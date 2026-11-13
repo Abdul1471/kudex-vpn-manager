@@ -448,8 +448,9 @@ def cleanup_expired_protocol_accounts(proto):
         print(" - " + item.get("name", "(unnamed)"))
     if not confirm("Permanently remove these " + str(len(expired)) + " expired " + PROTO_NAMES[proto] + " account(s)?"):
         return 0
-    expired_ids = {(item.get("name"), item.get("secret")) for item in expired}
-    remaining = [item for item in data if (item.get("name"), item.get("secret")) not in expired_ids]
+    expired_ids = {(item.get("protocol"), item.get("name"), item.get("secret")) for item in expired}
+    remaining = [item for item in data
+                 if (item.get("protocol"), item.get("name"), item.get("secret")) not in expired_ids]
     atomic_json(CLIENTS, remaining)
     try:
         apply_xray()
