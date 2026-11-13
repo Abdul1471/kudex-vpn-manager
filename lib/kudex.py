@@ -2458,6 +2458,7 @@ def dashboard():
     print(" [26] Dante SOCKS5 Proxy")
     print(" [27] BadVPN UDP Gateway   [28] OpenVPN Provisioning")
     print(" [29] Google Drive Backup  [30] SSH / Host Protection")
+    print(" [31] Active Session Manager")
     print(" [00] Exit")
     print(cyan+"─"*64+reset)
 
@@ -2956,6 +2957,118 @@ def host_protection_menu():
         else: print("Invalid selection.")
 
 
+
+def current_login_identity():
+    """Return the current loginctl session ID and terminal, when detectable."""
+    session_id = os.environ.get("XDG_SESSION_ID", "").strip()
+    tty = os.environ.get("SSH_TTY", "").strip()
+    if not tty:
+        try:
+            if sys.stdin.isatty():
+                tty = os.ttyname(sys.stdin.fileno())
+        except (OSError, ValueError):
+            tty = ""
+    return session_id, pathlib.Path(tty).name if tty else ""
+
+
+def loginctl_session(session_id):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", str(session_id)):
+        return None
+    proc = subprocess.run(
+        ["loginctl", "show-session", str(session_id), "--no-pager"],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False
+    )
+    if proc.returncode:
+        return None
+    values = {}
+    for line in proc.stdout.splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value
+    return {
+        "id": str(session_id), "uid": values.get("User", ""),
+        "user": values.get("Name", ""),
+        "tty": pathlib.Path(values.get("TTY", "")).name if values.get("TTY") else "",
+        "remote": values.get("Remote", "no").lower() == "yes",
+        "remote_host": values.get("RemoteHost", ""), "state": values.get("State", "unknown"),
+    }
+
+
+def list_login_sessions():
+    """Return loginctl sessions with identity and remote-session metadata."""
+    proc = subprocess.run(
+        ["loginctl", "list-sessions", "--no-legend", "--no-pager"],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False
+    )
+    if proc.returncode:
+        raise RuntimeError("systemd-logind session listing is unavailable on this server.")
+    rows = []
+    for line in proc.stdout.splitlines():
+        fields = line.split()
+        if fields:
+            row = loginctl_session(fields[0])
+            if row:
+                rows.append(row)
+    return rows
+
+
+def session_termination_allowed(row, current_session_id, current_tty):
+    """Never allow terminating root, the current session, or an unverified target."""
+    if not current_session_id and not current_tty:
+        return False
+    if not row or not row.get("id") or row.get("user") in ("", "root"):
+        return False
+    if row["id"] == current_session_id:
+        return False
+    if current_tty and row.get("tty") == current_tty:
+        return False
+    return bool(row.get("remote") or row.get("tty", "").startswith("pts/"))
+
+
+def terminate_login_session(session_id):
+    require_root()
+    current_id, current_tty = current_login_identity()
+    row = loginctl_session(session_id)
+    if not session_termination_allowed(row, current_id, current_tty):
+        raise RuntimeError("Session is protected, is not a verified remote login, or the current session could not be identified.")
+    run(["loginctl", "terminate-session", str(session_id)])
+    print("Session " + str(session_id) + " terminated.")
+
+
+def session_manager_menu():
+    require_root()
+    while True:
+        current_id, current_tty = current_login_identity()
+        try:
+            rows = list_login_sessions()
+        except RuntimeError as exc:
+            print(str(exc))
+            return
+        print("\\n--- ACTIVE LOGIN SESSIONS ---")
+        if not rows:
+            print("No login sessions were reported by systemd-logind.")
+        for row in rows:
+            protected = (row.get("user") == "root" or row.get("id") == current_id
+                         or (current_tty and row.get("tty") == current_tty))
+            kind = "REMOTE" if row.get("remote") or row.get("tty", "").startswith("pts/") else "LOCAL"
+            status = "PROTECTED" if protected else ("TERMINABLE" if session_termination_allowed(row, current_id, current_tty) else "NOT SAFE TO TERMINATE")
+            print(f" [{row['id']}] {row.get('user') or 'unknown':<16} {kind:<6} {row.get('remote_host') or row.get('tty') or '—':<24} {status}")
+        print("[1] Terminate a remote session [0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            if not current_id and not current_tty:
+                print("Kudex cannot identify this terminal session. Termination is disabled to prevent administrator lockout.")
+                continue
+            session_id = ask("Session ID")
+            row = loginctl_session(session_id)
+            if not session_termination_allowed(row, current_id, current_tty):
+                print("That session is protected or cannot be safely verified.")
+                continue
+            if confirm(f"Terminate {row['user']}'s session {session_id} from {row.get('remote_host') or row.get('tty')}?"):
+                terminate_login_session(session_id)
+
 def main():
     require_root(); ensure_dirs()
     if len(sys.argv) > 1:
@@ -3006,6 +3119,7 @@ def main():
             elif choice == "28": openvpn_menu()
             elif choice == "29": google_drive_menu()
             elif choice == "30": host_protection_menu()
+            elif choice == "31": session_manager_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
