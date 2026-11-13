@@ -67,6 +67,8 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
 
 The license API currently authenticates by the public IP observed by Cloudflare. It does not yet issue signed offline entitlements; an active network connection to the API is required for installation-time authentication.
 
+The version-controlled Cloudflare Worker source, repeatable D1 schema, endpoint reference, and deployment/security notes are maintained in [`cloudflare/`](cloudflare/README.md). The Worker dashboard deployment must be updated separately; pushing GitHub files does not deploy Cloudflare automatically.
+
 ## Menu
 
     [01] SSH [Menu]
