@@ -148,6 +148,10 @@ transport settings, Kudex validates the generated configuration with
 `xray run -test` before restarting the Xray service. Keep your current SSH
 session open while making remote service changes.
 
+## Authenticated SOCKS5 proxy (Dante)
+
+Menu **[26] Dante SOCKS5 Proxy** installs Dante on TCP/1080 with PAM username/password authentication. Kudex creates dedicated Linux accounts prefixed with `kpx_`, restricts PAM authentication to the `kudex-socks` group, and supports listing, locking, and unlocking those accounts. The installer verifies that the Dante binary reports PAM support before enabling the listener. SOCKS5 username/password authentication is not encrypted by the protocol; use a trusted tunnel or TLS-protected network and do not treat port 1080 as an encrypted tunnel.
+
 ## Authenticated HTTP proxy (Squid)
 
 Menu **[25] Authenticated HTTP Proxy** can install and configure Squid on TCP/8880. Kudex configures username/password authentication, allows localhost and authenticated clients only, and denies all other proxy access. Create a proxy user from the manager before connecting. The generated configuration is parsed by Squid before the service is restarted, and the prior Squid configuration is backed up. Do not open TCP/8880 in the provider firewall until you have created credentials and confirmed the server is reachable only as intended. The password database is root-owned and readable by the Squid service group.
