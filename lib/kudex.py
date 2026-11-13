@@ -510,6 +510,9 @@ def configure_reality():
     binary = xray_binary()
     if not binary:
         raise RuntimeError("Install Xray before configuring VLESS REALITY.")
+    server_domain = state().get("domain", "")
+    if not valid_domain(server_domain):
+        raise RuntimeError("Configure a valid server domain before setting up VLESS REALITY.")
     target = ask("REALITY target host:port (use a stable HTTPS origin, not a CDN proxy)", "www.example.com:443").strip()
     match = re.fullmatch(r"([A-Za-z0-9.-]+):([0-9]{1,5})", target)
     if not match or not valid_domain(match.group(1)) or not 1 <= int(match.group(2)) <= 65535:
@@ -566,6 +569,9 @@ def transport_manager_menu():
             proto = ask("Protocol (vmess, vless, trojan)").lower()
             if proto not in HTTPUPGRADE_PORTS:
                 print("Choose vmess, vless, or trojan.")
+                continue
+            if choice == "1" and (not valid_domain(st.get("domain", "")) or not st.get("tls")):
+                print("Configure the server domain and TLS certificate before enabling HTTPUpgrade.")
                 continue
             previous = read_json(STATE, {})
             st.setdefault("transports", {}).setdefault(proto, {})["httpupgrade"] = choice == "1"
@@ -697,6 +703,8 @@ def share_link(client, transport="websocket"):
     proto = client["protocol"]
     if transport == "reality":
         profile = reality_profile()
+        if host == "YOUR_DOMAIN" or not valid_domain(host):
+            return "Configure a valid server domain before sharing a REALITY URI."
         if proto != "vless" or not profile.get("enabled"):
             return "VLESS REALITY is not configured."
         query = urllib.parse.urlencode({
