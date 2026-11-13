@@ -15,6 +15,16 @@ class KudexValidationTests(unittest.TestCase):
         self.assertFalse(kudex.valid_name("1badname"))
         self.assertFalse(kudex.valid_name("bad name"))
 
+    def test_expiry_status_handles_expired_and_unlimited_accounts(self):
+        self.assertEqual(kudex.expiry_status(None), "NO EXPIRY")
+        self.assertEqual(kudex.expiry_status("2000-01-01T00:00:00+00:00"), "EXPIRED")
+
+    def test_expiry_from_days_returns_none_for_unlimited(self):
+        self.assertIsNone(kudex.expiry_from_days(0))
+        value = kudex.expiry_from_days(1)
+        self.assertIsNotNone(value)
+        self.assertIn("T", value)
+
     def test_valid_domains(self):
         self.assertTrue(kudex.valid_domain("vpn.example.com"))
         self.assertFalse(kudex.valid_domain("localhost"))
