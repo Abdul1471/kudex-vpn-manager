@@ -29,11 +29,11 @@ Already present in Kudex:
 | SSH, Dropbear, Stunnel4 | Partial | Align configurable listener ports while detecting conflicts and preserving existing SSH access |
 | SSH-WS on TCP/80 | Not implemented as a dedicated listener | Add an explicit listener option with conflict checks; do not silently take Nginx port 80 |
 | HTTPS VPN listener on TCP/443 | Partial | Existing Nginx terminates TLS; add supported transport routing without breaking ACME |
-| HTTP proxy on TCP/8880 | Not implemented | Add authenticated proxy provisioning, service lifecycle, firewall guidance, and tests |
+| HTTP proxy on TCP/8880 | Implemented (Squid) | Authenticated users, deny-by-default ACL, config validation/backup; pending VPS verification |
 | OpenVPN TCP/UDP provisioning | Not implemented | Add server/client configuration lifecycle; current menu only controls existing services |
 | OHP custom-header transport | Not implemented | Add supported OHP service and client configuration only after compatibility tests |
 | SlowDNS / DNSTT | Partial | Add multiple named profiles/custom keypairs and safe rotation/rollback |
-| Dante SOCKS5 on TCP/1080 | Not implemented | Add authenticated SOCKS5 service, account lifecycle integration, port checks, and tests |
+| Dante SOCKS5 on TCP/1080 | Implemented (PAM) | Dedicated group-restricted accounts, lock/unlock, port checks; pending VPS verification |
 | BadVPN UDPGW | Not implemented | Add UDP gateway service lifecycle and port-range validation |
 | Premium cloud license | Not implemented | Requires a real licensing API, issuer, terms, and secure server-side validation; no fake/offline success mode |
 | Telegram cloud backup/restore | Partial | Current implementation uploads and restores documents sent to the configured bot chat; arbitrary share-link restore is not supported |
@@ -84,4 +84,6 @@ Already present in Kudex:
 - [x] Proxy username management with bcrypt password hashes.
 - [x] Deny-by-default proxy ACL; unauthenticated remote proxy access is rejected.
 - [x] Squid configuration parse check and backup before activation.
-- [ ] SOCKS5 (Dante), OHP, BadVPN UDPGW, OpenVPN provisioning, license service, anti-multilogin, DDoS controls, and cloud Drive integration remain outstanding.
+- [x] Authenticated Dante SOCKS5 on TCP/1080, with PAM group-restricted users and account lock/unlock.
+- [ ] OHP, BadVPN UDPGW, OpenVPN provisioning, license service, anti-multilogin, DDoS controls, and cloud Drive integration remain outstanding.
+
