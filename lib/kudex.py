@@ -2944,7 +2944,8 @@ def install_fail2ban_protection():
 def host_protection_menu():
     while True:
         print(f"\\n--- SSH / HOST PROTECTION ---\\nFail2ban: {service_state('fail2ban.service')}")
-        print("[1] Enable SSH protection [2] Show SSH jail [3] Remove Kudex jail [0] Back")
+        print("[1] Enable SSH protection [2] Show SSH jail [3] Remove Kudex jail")
+        print("[4] Configure TCP connection guard [5] Guard status [6] Disable guard [0] Back")
         x=input("Select: ").strip()
         if x=="0": return
         if x=="1": install_fail2ban_protection()
@@ -2954,6 +2955,13 @@ def host_protection_menu():
         elif x=="3":
             p=pathlib.Path("/etc/fail2ban/jail.d/kudex-sshd.local")
             if p.exists() and confirm("Remove only Kudex's Fail2ban jail?"): p.unlink(); run(["fail2ban-client","reload"],check=False)
+        elif x=="4": ddos_guard_install()
+        elif x=="5":
+            cfg=ddos_guard_settings()
+            print("Configuration: "+(str(cfg) if cfg else "NOT CONFIGURED"))
+            print("Timer: "+service_state("kudex-ddos-guard.timer"))
+            if shutil.which("nft"): run(["nft","list","table","inet",DDOS_GUARD_TABLE],check=False)
+        elif x=="6": ddos_guard_remove()
         else: print("Invalid selection.")
 
 
@@ -3071,6 +3079,178 @@ def session_manager_menu():
             if confirm(f"Terminate {row['user']}'s session {session_id} from {row.get('remote_host') or row.get('tty')}?"):
                 terminate_login_session(session_id)
 
+
+DDOS_GUARD_CONFIG = ETC / "ddos-guard.json"
+DDOS_GUARD_SERVICE = pathlib.Path("/etc/systemd/system/kudex-ddos-guard.service")
+DDOS_GUARD_TIMER = pathlib.Path("/etc/systemd/system/kudex-ddos-guard.timer")
+DDOS_GUARD_TABLE = "kudex_guard"
+
+
+def ddos_guard_settings():
+    data = read_json(DDOS_GUARD_CONFIG, {})
+    threshold, minutes, allowlist = data.get("threshold", 150), data.get("ban_minutes", 10), data.get("allowlist", [])
+    if not isinstance(threshold, int) or not 50 <= threshold <= 5000:
+        return None
+    if not isinstance(minutes, int) or not 1 <= minutes <= 1440:
+        return None
+    if not isinstance(allowlist, list) or len(allowlist) > 100:
+        return None
+    try:
+        allowlist = [str(ipaddress.ip_network(v, strict=False)) for v in allowlist]
+    except (ValueError, TypeError):
+        return None
+    return {"threshold": threshold, "ban_minutes": minutes, "allowlist": allowlist}
+
+
+def guard_ip_exempt(address, allowlist):
+    ip = ipaddress.ip_address(address)
+    if any((ip.is_private, ip.is_loopback, ip.is_link_local, ip.is_multicast, ip.is_reserved, ip.is_unspecified)):
+        return True
+    return any(ip in ipaddress.ip_network(network) for network in allowlist)
+
+
+def parse_ss_peer_address(value):
+    value = value.strip()
+    host = value[1:value.index("]")] if value.startswith("[") and "]" in value else (value.rsplit(":", 1)[0] if ":" in value else value)
+    if "%" in host:
+        host = host.split("%", 1)[0]
+    try:
+        return str(ipaddress.ip_address(host))
+    except ValueError:
+        return None
+
+
+def nft_guard_table_ready():
+    p = subprocess.run(["nft", "list", "table", "inet", DDOS_GUARD_TABLE], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False)
+    return p.returncode == 0 and all(v in p.stdout for v in ("banned_v4", "banned_v6", "input_guard"))
+
+
+def create_nft_guard_table():
+    require_root()
+    if not shutil.which("nft"):
+        raise RuntimeError("nftables command is not installed.")
+    if nft_guard_table_ready():
+        return
+    existing = subprocess.run(["nft", "list", "table", "inet", DDOS_GUARD_TABLE], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+    if existing.returncode == 0:
+        raise RuntimeError("A partial or unrecognized Kudex nftables table exists; refusing to modify it.")
+    script = """add table inet kudex_guard
+add set inet kudex_guard banned_v4 { type ipv4_addr; flags timeout; timeout 10m; }
+add set inet kudex_guard banned_v6 { type ipv6_addr; flags timeout; timeout 10m; }
+add chain inet kudex_guard input_guard { type filter hook input priority -5; policy accept; }
+add rule inet kudex_guard input_guard ip saddr @banned_v4 drop
+add rule inet kudex_guard input_guard ip6 saddr @banned_v6 drop
+"""
+    run(["nft", "-f", "-"], input_text=script)
+
+
+def ddos_guard_scan():
+    require_root()
+    cfg = ddos_guard_settings()
+    if not cfg or not nft_guard_table_ready():
+        raise RuntimeError("Connection guard is not configured or its nftables table is missing.")
+    if not shutil.which("ss"):
+        raise RuntimeError("The ss command is required.")
+    p = subprocess.run(["ss", "-Htan", "state", "established"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if p.returncode:
+        raise RuntimeError("Could not inspect TCP connections: " + (p.stderr or "").strip())
+    counts = {}
+    for line in p.stdout.splitlines():
+        fields = line.split()
+        if len(fields) >= 5:
+            address = parse_ss_peer_address(fields[-1])
+            if address:
+                counts[address] = counts.get(address, 0) + 1
+    banned = []
+    for address, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+        if count < cfg["threshold"] or guard_ip_exempt(address, cfg["allowlist"]):
+            continue
+        family = "banned_v6" if ipaddress.ip_address(address).version == 6 else "banned_v4"
+        run(["nft", "add", "element", "inet", DDOS_GUARD_TABLE, family, "{", address, "timeout", str(cfg["ban_minutes"]) + "m", "}"])
+        banned.append((address, count))
+    for address, count in banned:
+        print(f"Temporary connection-abuse ban: {address} ({count} established TCP connections).")
+    return banned
+
+
+def ddos_guard_install():
+    require_root()
+    if not shutil.which("nft"):
+        if not confirm("Install nftables? Kudex will create only its own dedicated firewall table."):
+            return
+        run(["apt-get", "update"])
+        run(["apt-get", "install", "-y", "--no-install-recommends", "nftables"])
+    peer = os.environ.get("SSH_CONNECTION", "").split()
+    defaults = []
+    if peer:
+        try:
+            ip = ipaddress.ip_address(peer[0])
+            defaults.append(str(ip) + ("/32" if ip.version == 4 else "/128"))
+        except ValueError:
+            pass
+    raw = ask("Administrator IPs/CIDRs to allowlist (comma-separated)", ",".join(defaults))
+    allowlist = []
+    for value in [v.strip() for v in raw.split(",") if v.strip()]:
+        try:
+            allowlist.append(str(ipaddress.ip_network(value, strict=False)))
+        except ValueError:
+            raise RuntimeError("Invalid allowlist entry: " + value)
+    threshold = ask("Concurrent established TCP connections before ban (50-5000)", "150")
+    minutes = ask("Ban duration in minutes (1-1440)", "10")
+    if not threshold.isdigit() or not 50 <= int(threshold) <= 5000:
+        raise RuntimeError("Threshold must be between 50 and 5000.")
+    if not minutes.isdigit() or not 1 <= int(minutes) <= 1440:
+        raise RuntimeError("Ban duration must be between 1 and 1440 minutes.")
+    if not confirm("Enable this limited TCP connection-abuse guard? Private and allowlisted IPs are exempt. This is not upstream DDoS protection."):
+        return
+    create_nft_guard_table()
+    atomic_json(DDOS_GUARD_CONFIG, {"threshold": int(threshold), "ban_minutes": int(minutes), "allowlist": allowlist})
+    DDOS_GUARD_SERVICE.write_text("""[Unit]
+Description=Kudex TCP connection-abuse scan
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/kudex-vpn-manager/lib/kudex.py --ddos-guard-scan
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+""")
+    DDOS_GUARD_TIMER.write_text("""[Unit]
+Description=Run Kudex TCP connection-abuse scan every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+""")
+    os.chmod(DDOS_GUARD_SERVICE, 0o644)
+    os.chmod(DDOS_GUARD_TIMER, 0o644)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", "--now", "kudex-ddos-guard.timer"])
+    print("Kudex TCP connection-abuse guard enabled (one scan per minute).")
+
+
+def ddos_guard_remove():
+    require_root()
+    if not confirm("Disable the guard and remove only Kudex's nftables table?"):
+        return
+    run(["systemctl", "disable", "--now", "kudex-ddos-guard.timer"], check=False)
+    run(["systemctl", "stop", "kudex-ddos-guard.service"], check=False)
+    run(["nft", "delete", "table", "inet", DDOS_GUARD_TABLE], check=False)
+    DDOS_GUARD_SERVICE.unlink(missing_ok=True)
+    DDOS_GUARD_TIMER.unlink(missing_ok=True)
+    DDOS_GUARD_CONFIG.unlink(missing_ok=True)
+    run(["systemctl", "daemon-reload"])
+    print("Guard disabled; unrelated firewall tables were not changed.")
+
 def main():
     require_root(); ensure_dirs()
     if len(sys.argv) > 1:
@@ -3083,6 +3263,7 @@ def main():
         if sys.argv[1] == "upgrade": upgrade_system(); return
         if sys.argv[1] == "--backup-auto": backup(auto_upload=True); return
         if sys.argv[1] == "--expire": expire_due_accounts(); return
+        if sys.argv[1] == "--ddos-guard-scan": ddos_guard_scan(); return
     expire_due_accounts()
     while True:
         expire_due_accounts()
