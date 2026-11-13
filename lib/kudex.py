@@ -204,15 +204,26 @@ def apply_xray():
         test = subprocess.run([binary, "run", "-test", "-config", temp], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         if test.returncode:
             raise RuntimeError("Xray rejected the generated configuration:\n" + test.stdout[-3000:])
+        previous = None
         if XRAY_CONFIG.exists():
+            previous = XRAY_CONFIG.read_bytes()
             backup = XRAY_CONFIG.with_suffix(".json.kudex-backup")
             shutil.copy2(XRAY_CONFIG, backup)
         os.replace(temp, XRAY_CONFIG)
         os.chmod(XRAY_CONFIG, 0o600)
+        try:
+            run(["systemctl", "restart", "xray.service"])
+        except Exception:
+            if previous is not None:
+                XRAY_CONFIG.write_bytes(previous)
+                os.chmod(XRAY_CONFIG, 0o600)
+                subprocess.run(["systemctl", "restart", "xray.service"], check=False)
+            else:
+                XRAY_CONFIG.unlink(missing_ok=True)
+            raise
     finally:
         if os.path.exists(temp):
             os.unlink(temp)
-    run(["systemctl", "restart", "xray.service"])
     print("Xray configuration validated and service restarted.")
 
 def nginx_config(st):
@@ -285,7 +296,11 @@ def configure_domain():
     st["tls"] = True
     atomic_json(STATE, st)
     apply_nginx()
-    print("TLS certificate issued. Certbot renewal timer should manage renewals.")
+    hook = pathlib.Path("/etc/letsencrypt/renewal-hooks/deploy/kudex-nginx-reload")
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text("#!/bin/sh\nsystemctl reload nginx.service\n")
+    os.chmod(hook, 0o755)
+    print("TLS certificate issued. Certbot renewal timer will reload Nginx after renewal.")
 
 def protocol_menu(proto):
     if proto == "sshws":
@@ -413,6 +428,54 @@ def backup():
     os.chmod(target, 0o600)
     print(f"Backup created: {target}")
 
+def restore_backup():
+    ensure_dirs()
+    archives = sorted(BACKUPS.glob("kudex-*.tar.gz"), reverse=True)
+    if not archives:
+        print("No Kudex backups found."); return
+    for i, item in enumerate(archives, 1): print(f"[{i}] {item.name}")
+    raw = ask("Backup number")
+    if not raw.isdigit() or not (1 <= int(raw) <= len(archives)):
+        print("Invalid selection."); return
+    chosen = archives[int(raw)-1]
+    if not confirm(f"Restore protected configuration from {chosen.name}?"):
+        return
+    allowed = {"etc/kudex/state.json", "etc/kudex/clients.json",
+               "usr/local/etc/xray/config.json", "etc/nginx/sites-available/kudex.conf"}
+    staged = {}
+    with tarfile.open(chosen, "r:gz") as tf:
+        for member in tf.getmembers():
+            name = member.name.lstrip("./")
+            if name in allowed and member.isfile():
+                stream = tf.extractfile(member)
+                if stream: staged[name] = stream.read()
+    if not staged:
+        raise RuntimeError("Backup contained no recognized Kudex configuration files.")
+    targets = {
+        "etc/kudex/state.json": STATE, "etc/kudex/clients.json": CLIENTS,
+        "usr/local/etc/xray/config.json": XRAY_CONFIG, "etc/nginx/sites-available/kudex.conf": NGINX_SITE
+    }
+    previous = {name: (path.read_bytes() if path.exists() else None) for name, path in targets.items() if name in staged}
+    try:
+        for name, content in staged.items():
+            path = targets[name]; path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content); os.chmod(path, 0o600 if name.startswith(("etc/kudex", "usr/local/etc/xray")) else 0o644)
+        if "usr/local/etc/xray/config.json" in staged and xray_binary():
+            test = subprocess.run([xray_binary(), "run", "-test", "-config", str(XRAY_CONFIG)], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            if test.returncode: raise RuntimeError("Restored Xray config failed validation: " + test.stdout[-2000:])
+        if "etc/nginx/sites-available/kudex.conf" in staged:
+            test = subprocess.run(["nginx", "-t"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+            if test.returncode: raise RuntimeError("Restored Nginx config failed validation: " + test.stdout[-2000:])
+        if "usr/local/etc/xray/config.json" in staged and xray_binary(): run(["systemctl", "restart", "xray.service"])
+        if "etc/nginx/sites-available/kudex.conf" in staged: run(["systemctl", "reload", "nginx.service"])
+    except Exception:
+        for name, old in previous.items():
+            path = targets[name]
+            if old is None: path.unlink(missing_ok=True)
+            else: path.write_bytes(old)
+        raise
+    print(f"Restored {len(staged)} configuration files from {chosen.name}.")
+
 def diagnostics():
     print("\n--- SERVICE STATUS ---")
     for label, unit in (("SSH", "ssh.service"), ("NGINX", "nginx.service"), ("XRAY", "xray.service"), ("DROPBEAR", "dropbear.service")):
@@ -426,9 +489,13 @@ def diagnostics():
 
 def main():
     require_root(); ensure_dirs()
-    if len(sys.argv) > 1 and sys.argv[1] == "--install-xray":
-        install_xray()
-        return
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--install-xray":
+            install_xray(); return
+        if sys.argv[1] == "--apply-config":
+            apply_xray()
+            if state().get("domain"): apply_nginx()
+            return
     while True:
         st = state()
         print("\n" + "=" * 46 + "\n           KUDEX VPN MANAGER\n" + "=" * 46)
@@ -436,7 +503,7 @@ def main():
             print(f"{label:<12}: {service_state(unit).upper()}")
         print(f"{'SSH-WS':<12}: {'READY' if st.get('protocols',{}).get('sshws') and xray_binary() else 'NOT CONFIGURED'}")
         print("\n[01] SSH [Menu]\n[02] VMESS [Menu]\n[03] VLESS [Menu]\n[04] TROJAN [Menu]\n[05] SSH-WEBSOCKET [Menu]")
-        print("[06] BACKUP  [07] DOMAIN & SSL  [08] CHECK RUNNING")
+        print("[06] BACKUP  [07] DOMAIN & SSL  [08] CHECK RUNNING  [12] RESTORE BACKUP")
         print("[09] SERVICE CONTROL  [10] INSTALL/UPDATE XRAY  [11] APPLY CONFIG")
         print("[00] EXIT SYSTEM")
         choice = input("\nSelect option: ").strip()
@@ -457,6 +524,7 @@ def main():
                 else: print("Unsupported service.")
             elif choice == "10": install_xray()
             elif choice == "11": apply_xray(); apply_nginx() if state().get("domain") else None
+            elif choice == "12": restore_backup()
             elif choice in ("0", "00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc:
