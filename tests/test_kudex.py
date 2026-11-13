@@ -81,6 +81,14 @@ class KudexValidationTests(unittest.TestCase):
         self.assertFalse(kudex.valid_domain("-bad.example.com"))
         self.assertFalse(kudex.valid_domain("bad..example.com"))
 
+    def test_certbot_domain_setup_does_not_require_email(self):
+        args = kudex.certbot_issue_args("vpn.example.com", "/var/www/kudex-acme")
+        self.assertIn("--register-unsafely-without-email", args)
+        self.assertIn("--agree-tos", args)
+        self.assertIn("--non-interactive", args)
+        self.assertIn("vpn.example.com", args)
+        self.assertNotIn("--email", args)
+
     @mock.patch.object(kudex, "state", return_value={
         "domain": "vpn.example.com",
         "protocols": {"vmess": True, "vless": True, "trojan": True, "sshws": True}
