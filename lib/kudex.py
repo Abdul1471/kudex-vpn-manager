@@ -1053,15 +1053,134 @@ def service_menu(label, unit):
             run(["systemctl", actions[c], unit])
         else: print("Invalid selection.")
 
-def backup():
+
+TELEGRAM_CONFIG = ETC / "telegram.json"
+
+def telegram_settings():
+    data = read_json(TELEGRAM_CONFIG, {})
+    token = data.get("bot_token", "")
+    chat_id = str(data.get("chat_id", ""))
+    return {"bot_token": token, "chat_id": chat_id} if token and chat_id else None
+
+def telegram_api(method, token, payload=None):
+    url = "https://api.telegram.org/bot" + token + "/" + method
+    body = urllib.parse.urlencode(payload).encode() if payload is not None else None
+    request = urllib.request.Request(url, data=body, headers={"User-Agent": "KudexVPNManager"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        raise RuntimeError("Telegram request failed. Check internet access and bot configuration.")
+    if not result.get("ok"):
+        raise RuntimeError("Telegram API error: " + str(result.get("description", "request rejected"))[:300])
+    return result.get("result")
+
+def configure_telegram():
+    require_root()
+    print("Create a bot with @BotFather and obtain a fresh token.")
+    token = getpass.getpass("Telegram bot token (input hidden): ").strip()
+    if not re.fullmatch(r"[0-9]{5,15}:[A-Za-z0-9_-]{20,}", token):
+        raise RuntimeError("The bot token format does not look valid.")
+    chat_id = ask("Telegram chat ID (numeric ID or @channel username)")
+    if not re.fullmatch(r"-?[0-9]{1,20}|@[A-Za-z0-9_]{5,}", chat_id):
+        raise RuntimeError("Enter a numeric chat ID or a channel username beginning with @.")
+    telegram_api("getMe", token)
+    atomic_json(TELEGRAM_CONFIG, {"bot_token": token, "chat_id": chat_id}, 0o600)
+    os.chmod(TELEGRAM_CONFIG, 0o600)
+    print("Telegram bot configuration saved securely. Token hidden.")
+
+def test_telegram_connection():
+    settings = telegram_settings()
+    if not settings:
+        raise RuntimeError("Telegram is not configured. Choose Configure Telegram first.")
+    bot = telegram_api("getMe", settings["bot_token"])
+    telegram_api("sendMessage", settings["bot_token"], {
+        "chat_id": settings["chat_id"],
+        "text": "Kudex VPN Manager: Telegram backup connection test successful."
+    })
+    print("Telegram connection successful. Bot: @" + str(bot.get("username", "configured")) + ". Test message sent.")
+
+def upload_telegram_backup(archive):
+    settings = telegram_settings()
+    if not settings:
+        raise RuntimeError("Telegram backup is not configured.")
+    path = pathlib.Path(archive)
+    if path.parent.resolve() != BACKUPS.resolve() or not re.fullmatch(r"kudex-[0-9]{8}-[0-9]{6}\.tar\.gz", path.name):
+        raise RuntimeError("Refusing to upload a file outside the Kudex backup directory.")
+    if not path.is_file():
+        raise RuntimeError("The selected backup file does not exist.")
+    boundary = "----Kudex" + secrets.token_hex(16)
+    chunks = []
+    fields = [("chat_id", settings["chat_id"]), ("caption", "Kudex server backup: " + path.name)]
+    for name, value in fields:
+        chunks.extend(["--" + boundary + "\r\n",
+                       'Content-Disposition: form-data; name="' + name + '"\r\n\r\n',
+                       value, "\r\n"])
+    chunks.extend(["--" + boundary + "\r\n",
+                   'Content-Disposition: form-data; name="document"; filename="' + path.name + '"\r\n',
+                   "Content-Type: application/gzip\r\n\r\n"])
+    body = "".join(chunks).encode() + path.read_bytes() + ("\r\n--" + boundary + "--\r\n").encode()
+    url = "https://api.telegram.org/bot" + settings["bot_token"] + "/sendDocument"
+    request = urllib.request.Request(url, data=body, headers={
+        "Content-Type": "multipart/form-data; boundary=" + boundary,
+        "User-Agent": "KudexVPNManager"
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except Exception:
+        raise RuntimeError("Telegram backup upload failed. The local backup remains safe; check network access and Telegram file-size limits.")
+    if not result.get("ok"):
+        raise RuntimeError("Telegram upload failed: " + str(result.get("description", "request rejected"))[:300])
+    print("Backup uploaded to Telegram: " + path.name)
+
+def telegram_backup_menu():
+    while True:
+        print("\n--- TELEGRAM BACKUP ---")
+        print("Configuration: " + ("READY" if telegram_settings() else "NOT CONFIGURED"))
+        print("[1] Configure / replace bot credentials")
+        print("[2] Test connection (sends a test message)")
+        print("[3] Upload latest local backup")
+        print("[4] Remove Telegram configuration")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            configure_telegram()
+        elif choice == "2":
+            test_telegram_connection()
+        elif choice == "3":
+            archives = sorted(BACKUPS.glob("kudex-*.tar.gz"), reverse=True)
+            if not archives:
+                print("No local Kudex backups found. Create a backup first.")
+            else:
+                upload_telegram_backup(archives[0])
+        elif choice == "4":
+            if TELEGRAM_CONFIG.exists() and confirm("Remove the saved Telegram bot token and chat ID?"):
+                TELEGRAM_CONFIG.unlink()
+                print("Telegram configuration removed.")
+        else:
+            print("Invalid selection.")
+
+def backup(auto_upload=False):
     ensure_dirs()
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     target = BACKUPS / f"kudex-{stamp}.tar.gz"
     items = [p for p in (ETC, XRAY_CONFIG, NGINX_SITE) if p.exists()]
     with tarfile.open(target, "w:gz") as tf:
-        for p in items: tf.add(p, arcname=str(p).lstrip("/"))
+        for p in items:
+            def exclude_telegram_secret(member):
+                return None if member.name.rstrip("/") == "etc/kudex/telegram.json" else member
+            tf.add(p, arcname=str(p).lstrip("/"), filter=exclude_telegram_secret)
     os.chmod(target, 0o600)
     print(f"Backup created: {target}")
+    if auto_upload and telegram_settings():
+        try:
+            upload_telegram_backup(target)
+        except RuntimeError as exc:
+            print(f"[TELEGRAM WARNING] {exc}")
+    return target
 
 
 def install_backup_schedule(hours):
@@ -1144,6 +1263,7 @@ def backup_menu():
         print("[5] List available backups")
         print("[6] Enable automatic account expiry checks")
         print("[7] Disable automatic account expiry checks")
+        print("[8] Telegram backup integration")
         print(f"Backup schedule: {timer_state} | Expiry checks: {expiry_timer_state}")
         print("[0] Back")
         choice = input("Select: ").strip()
@@ -1171,6 +1291,8 @@ def backup_menu():
             if confirm("Disable automatic account expiry checks?"):
                 subprocess.run(["systemctl", "disable", "--now", "kudex-expiry.timer"], check=False)
                 print("Automatic account expiry checks disabled.")
+        elif choice == "8":
+            telegram_backup_menu()
         else:
             print("Invalid selection.")
 
@@ -1638,7 +1760,7 @@ def main():
             return
         if sys.argv[1] == "update": update_app(); return
         if sys.argv[1] == "upgrade": upgrade_system(); return
-        if sys.argv[1] == "--backup-auto": backup(); return
+        if sys.argv[1] == "--backup-auto": backup(auto_upload=True); return
         if sys.argv[1] == "--expire": expire_due_accounts(); return
     expire_due_accounts()
     while True:
