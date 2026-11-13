@@ -246,3 +246,8 @@ OHP custom-header transport, cloud licensing, per-account failed-login lockout, 
 ## Active SSH session management
 
 Menu **[31] Active Session Manager** lists sessions reported by systemd-logind and can terminate a selected verified remote login. Kudex protects root sessions, the current loginctl session, and the terminal currently running Kudex. If the current terminal cannot be identified, session termination is disabled. The manager re-reads the target session immediately before termination. Systems without systemd-logind session data are not supported by this feature; Kudex does not fall back to broad process-kill commands.
+
+
+## TCP connection-abuse guard
+
+Menu **[30] SSH / Host Protection** includes an optional nftables TCP connection-abuse guard. It checks established TCP connections once per minute and temporarily bans a public source IP when its concurrent connection count reaches the configured threshold. Private, loopback, link-local, reserved, multicast, and explicitly allowlisted addresses are exempt. Kudex creates and removes only its own dedicated nftables table; it does not flush UFW, Docker, or other firewall rules. Keep the administrator's public IP/CIDR allowlisted. This is a basic per-source connection guard, not volumetric DDoS protection, and cannot stop attacks that saturate the provider network before reaching the VPS.
