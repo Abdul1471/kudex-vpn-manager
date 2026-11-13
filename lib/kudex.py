@@ -505,6 +505,101 @@ def cleanup_expired_protocol_accounts(proto):
     print("Removed " + str(len(expired)) + " expired account(s).")
     return len(expired)
 
+def configure_reality():
+    require_root()
+    binary = xray_binary()
+    if not binary:
+        raise RuntimeError("Install Xray before configuring VLESS REALITY.")
+    target = ask("REALITY target host:port (use a stable HTTPS origin, not a CDN proxy)", "www.example.com:443").strip()
+    match = re.fullmatch(r"([A-Za-z0-9.-]+):([0-9]{1,5})", target)
+    if not match or not valid_domain(match.group(1)) or not 1 <= int(match.group(2)) <= 65535:
+        raise RuntimeError("Enter a valid target such as www.example.com:443.")
+    server_name = ask("Allowed REALITY serverName", match.group(1)).strip().lower()
+    if not valid_domain(server_name):
+        raise RuntimeError("Enter a valid DNS serverName.")
+    if not confirm("REALITY forwards unauthenticated handshakes to the configured target. Confirm you are authorized to configure this endpoint and understand the fallback behavior?"):
+        return
+    result = subprocess.run([binary, "x25519"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if result.returncode:
+        raise RuntimeError("Xray could not generate REALITY keys: " + result.stdout[-1000:])
+    private_match = re.search(r"(?im)^\\s*(?:PrivateKey|Private key)\\s*:\\s*([A-Za-z0-9_-]+)\\s*$", result.stdout)
+    public_match = re.search(r"(?im)^\\s*(?:Password|PublicKey|Public key)\\s*:\\s*([A-Za-z0-9_-]+)\\s*$", result.stdout)
+    if not private_match or not public_match:
+        raise RuntimeError("Unrecognized Xray x25519 output; no REALITY settings were changed.")
+    previous = reality_profile()
+    profile = {"enabled": True, "target": target, "server_name": server_name,
+               "private_key": private_match.group(1), "public_key": public_match.group(1),
+               "short_id": secrets.token_hex(8)}
+    atomic_json(REALITY_CONFIG, profile, 0o600)
+    try:
+        apply_xray()
+    except Exception:
+        if previous:
+            atomic_json(REALITY_CONFIG, previous, 0o600)
+        else:
+            REALITY_CONFIG.unlink(missing_ok=True)
+        raise
+    print(f"VLESS REALITY enabled on TCP/{REALITY_PORT}. Allow this port in your provider firewall.")
+    print("The private key is stored in the root-only Kudex configuration directory.")
+
+def transport_manager_menu():
+    require_root()
+    while True:
+        st = state()
+        profile = reality_profile()
+        print("\n--- XRAY TRANSPORT MANAGER ---")
+        print("HTTPUpgrade:")
+        for proto in ("vmess", "vless", "trojan"):
+            enabled = st.get("transports", {}).get(proto, {}).get("httpupgrade", False)
+            print(f"  {proto.upper():<8} {'ENABLED' if enabled else 'DISABLED'}")
+        print(f"VLESS REALITY: {'ENABLED' if profile.get('enabled') else 'DISABLED'}")
+        print(f"REALITY listener: TCP/{REALITY_PORT} (direct Xray listener)")
+        print("[1] Enable HTTPUpgrade for a protocol")
+        print("[2] Disable HTTPUpgrade for a protocol")
+        print("[3] Configure / rotate VLESS REALITY keys")
+        print("[4] Disable VLESS REALITY")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice in ("1", "2"):
+            proto = ask("Protocol (vmess, vless, trojan)").lower()
+            if proto not in HTTPUPGRADE_PORTS:
+                print("Choose vmess, vless, or trojan.")
+                continue
+            previous = read_json(STATE, {})
+            st.setdefault("transports", {}).setdefault(proto, {})["httpupgrade"] = choice == "1"
+            atomic_json(STATE, st)
+            try:
+                apply_xray()
+                if st.get("domain") and st.get("tls"):
+                    apply_nginx()
+            except Exception:
+                if previous:
+                    atomic_json(STATE, previous)
+                raise
+            print(f"{proto.upper()} HTTPUpgrade {'enabled' if choice == '1' else 'disabled'}.")
+            if choice == "1":
+                print(f"Public endpoint: {st.get('domain') or 'YOUR_DOMAIN'}:443{HTTPUPGRADE_PATHS[proto]}")
+        elif choice == "3":
+            configure_reality()
+        elif choice == "4":
+            if not profile.get("enabled"):
+                print("VLESS REALITY is already disabled.")
+                continue
+            if not confirm("Disable VLESS REALITY and remove its private key from the active configuration?"):
+                continue
+            previous = profile
+            atomic_json(REALITY_CONFIG, {**profile, "enabled": False}, 0o600)
+            try:
+                apply_xray()
+            except Exception:
+                atomic_json(REALITY_CONFIG, previous, 0o600)
+                raise
+            print("VLESS REALITY disabled. Existing client records were preserved.")
+        else:
+            print("Invalid selection.")
+
 def protocol_menu(proto):
     if proto == "sshws":
         st = state()
@@ -2003,7 +2098,7 @@ def dashboard():
     print(" [17] Ports & Server Info  [18] Stunnel4 & OpenVPN")
     print(" [19] SSH Security Manager [20] SlowDNS / DNSTT")
     print(" [21] SSH Banner Editor    [22] Auto-Reboot Scheduler")
-    print(" [23] Server Speed Test")
+    print(" [23] Server Speed Test      [24] Xray Transport Manager")
     print(" [00] Exit")
     print(cyan+"─"*64+reset)
 
@@ -2045,6 +2140,11 @@ def ports_info():
     print("Dropbear      : TCP/2222 (when installed)")
     print("Nginx HTTP    : TCP/80")
     print("Nginx HTTPS   : TCP/443 (when TLS configured)")
+    if reality_profile().get("enabled"):
+        print(f"VLESS REALITY : TCP/{REALITY_PORT} (direct listener)")
+    for proto, port in HTTPUPGRADE_PORTS.items():
+        if state().get("transports", {}).get(proto, {}).get("httpupgrade", False):
+            print(f"{proto.upper()} HTTPUpgrade: 127.0.0.1:{port} {HTTPUPGRADE_PATHS[proto]} via Nginx/443")
     for proto in ("vmess", "vless", "trojan", "sshws"):
         print(f"{PROTO_NAMES[proto]:<14}: 127.0.0.1:{PORTS[proto]} {PATHS[proto]}")
     print("\n--- LISTENING SOCKETS ---")
@@ -2258,6 +2358,7 @@ def main():
             elif choice == "21": banner_menu()
             elif choice == "22": auto_reboot_menu()
             elif choice == "23": speed_test_menu()
+            elif choice == "24": transport_manager_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
