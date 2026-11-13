@@ -3135,7 +3135,7 @@ def create_nft_guard_table():
     if existing.returncode == 0:
         raise RuntimeError("A partial or unrecognized Kudex nftables table exists; refusing to modify it.")
     script = """add table inet kudex_guard
-add set inet kudex_guard banned_v4 { type ipv4_addr; flags timeout; timeout 10m; }
+add set inet kudex_guard banned_v4 { type ipv4_addr; flags timeout; timeout 24h; }
 add set inet kudex_guard banned_v6 { type ipv6_addr; flags timeout; timeout 10m; }
 add chain inet kudex_guard input_guard { type filter hook input priority -5; policy accept; }
 add rule inet kudex_guard input_guard ip saddr @banned_v4 drop
@@ -3166,7 +3166,7 @@ def ddos_guard_scan():
         if count < cfg["threshold"] or guard_ip_exempt(address, cfg["allowlist"]):
             continue
         family = "banned_v6" if ipaddress.ip_address(address).version == 6 else "banned_v4"
-        run(["nft", "add", "element", "inet", DDOS_GUARD_TABLE, family, "{", address, "timeout", str(cfg["ban_minutes"]) + "m", "}"])
+        run(["nft", "-exist", "add", "element", "inet", DDOS_GUARD_TABLE, family, "{", address, "timeout", str(cfg["ban_minutes"]) + "m", "}"])
         banned.append((address, count))
     for address, count in banned:
         print(f"Temporary connection-abuse ban: {address} ({count} established TCP connections).")
