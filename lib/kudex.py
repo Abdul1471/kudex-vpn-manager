@@ -746,6 +746,184 @@ def ssh_security_menu():
             print("Invalid selection.")
 
 
+
+DNSTT_DIR = ETC / "dnstt"
+DNSTT_PRIVATE_KEY = DNSTT_DIR / "server.key"
+DNSTT_PUBLIC_KEY = DNSTT_DIR / "server.pub"
+DNSTT_STATE = DNSTT_DIR / "server.json"
+DNSTT_UNIT = pathlib.Path("/etc/systemd/system/kudex-dnstt.service")
+DNSTT_BINARY = pathlib.Path("/usr/local/bin/dnstt-server")
+
+def dnstt_server_installed():
+    return shutil.which("dnstt-server") or (str(DNSTT_BINARY) if DNSTT_BINARY.exists() else None)
+
+def install_dnstt_server():
+    require_root()
+    go = shutil.which("go")
+    if not go:
+        if not confirm("Go is required. Install golang-go using apt?"):
+            return False
+        run(["apt-get", "update"])
+        run(["apt-get", "install", "-y", "golang-go"])
+        go = shutil.which("go")
+    if not go:
+        raise RuntimeError("Go compiler was not found.")
+    env = os.environ.copy()
+    env["GOBIN"] = "/usr/local/bin"
+    p = subprocess.run([go, "install", "www.bamsoftware.com/git/dnstt.git/dnstt-server@latest"],
+                       text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
+    if p.returncode:
+        raise RuntimeError("DNSTT build failed:\n" + p.stdout[-3000:])
+    if not DNSTT_BINARY.exists():
+        raise RuntimeError("DNSTT executable was not created in /usr/local/bin.")
+    os.chmod(DNSTT_BINARY, 0o755)
+    print("Upstream DNSTT server built and installed.")
+    return True
+
+def generate_dnstt_keys():
+    require_root()
+    binary = dnstt_server_installed()
+    if not binary:
+        raise RuntimeError("Install the DNSTT server binary first.")
+    if DNSTT_PRIVATE_KEY.exists() and not confirm("A keypair exists. Rotate it? Existing clients will need the new public key."):
+        return False
+    DNSTT_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if DNSTT_PRIVATE_KEY.exists():
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_dir = BACKUPS / ("dnstt-key-" + stamp)
+        backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        shutil.copy2(DNSTT_PRIVATE_KEY, backup_dir / "server.key")
+        if DNSTT_PUBLIC_KEY.exists():
+            shutil.copy2(DNSTT_PUBLIC_KEY, backup_dir / "server.pub")
+        os.chmod(backup_dir / "server.key", 0o600)
+    p = subprocess.run([binary, "-gen-key", "-privkey-file", str(DNSTT_PRIVATE_KEY),
+                        "-pubkey-file", str(DNSTT_PUBLIC_KEY)],
+                       text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if p.returncode:
+        raise RuntimeError("DNSTT key generation failed:\n" + p.stdout[-2000:])
+    os.chmod(DNSTT_PRIVATE_KEY, 0o600)
+    os.chmod(DNSTT_PUBLIC_KEY, 0o644)
+    print("DNSTT keypair generated. Keep server.key private; share only server.pub.")
+    return True
+
+def dnstt_key_status():
+    print("\n--- SLOWDNS / DNSTT KEY STATUS ---")
+    print(f"Server binary : {'INSTALLED' if dnstt_server_installed() else 'NOT INSTALLED'}")
+    print(f"Private key   : {'PRESENT' if DNSTT_PRIVATE_KEY.exists() else 'MISSING'}")
+    print(f"Public key    : {'PRESENT' if DNSTT_PUBLIC_KEY.exists() else 'MISSING'}")
+    if DNSTT_PUBLIC_KEY.exists():
+        print("Public key (share with authorized clients):")
+        print(DNSTT_PUBLIC_KEY.read_text().strip())
+
+def configure_dnstt_server():
+    require_root()
+    if not dnstt_server_installed():
+        raise RuntimeError("Install the DNSTT server binary first.")
+    if not DNSTT_PRIVATE_KEY.exists():
+        raise RuntimeError("Generate a DNSTT keypair first.")
+    zone = ask("Delegated tunnel DNS zone (for example t.example.com)")
+    if not valid_domain(zone):
+        raise RuntimeError("Enter a valid tunnel zone such as t.example.com.")
+    upstream = ask("Local TCP service to forward to", "127.0.0.1:22")
+    match = re.fullmatch(r"([A-Za-z0-9.-]+):(\d{1,5})", upstream)
+    if not match or not 1 <= int(match.group(2)) <= 65535 or match.group(1).startswith("-"):
+        raise RuntimeError("Invalid upstream. Use host:port, for example 127.0.0.1:22.")
+    if shutil.which("ss"):
+        check = subprocess.run(["ss", "-H", "-lun", "sport", "=", ":53"],
+                                text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if check.stdout.strip():
+            raise RuntimeError("UDP/53 is already in use. Resolve the conflict before enabling DNSTT.")
+    print("\nDNS prerequisites:")
+    print("  A/AAAA record for your authoritative nameserver host must point to this VPS.")
+    print(f"  Delegate NS for {zone} to that nameserver host at your registrar.")
+    print("  Allow inbound UDP/53 in provider and host firewalls.")
+    print("  Kudex does not edit DNS records, firewall rules, or NAT.")
+    if not confirm(f"Create and start DNSTT on UDP/53 for {zone}, forwarding streams to {upstream}?"):
+        return
+    try:
+        import pwd
+        try:
+            account = pwd.getpwnam("dnstt")
+        except KeyError:
+            run(["useradd", "--system", "--home-dir", "/nonexistent", "--shell", "/usr/sbin/nologin", "dnstt"])
+            account = pwd.getpwnam("dnstt")
+        os.chown(DNSTT_DIR, account.pw_uid, account.pw_gid)
+        os.chown(DNSTT_PRIVATE_KEY, account.pw_uid, account.pw_gid)
+        os.chmod(DNSTT_DIR, 0o750)
+        os.chmod(DNSTT_PRIVATE_KEY, 0o600)
+    except (ImportError, KeyError, OSError) as exc:
+        raise RuntimeError(f"Could not prepare restricted DNSTT account: {exc}")
+    atomic_json(DNSTT_STATE, {"zone": zone.lower(), "upstream": upstream}, 0o600)
+    unit = f"""[Unit]
+Description=Kudex DNSTT DNS tunnel server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dnstt
+Group=dnstt
+ExecStart={DNSTT_BINARY} -udp :53 -privkey-file {DNSTT_PRIVATE_KEY} {zone.lower()} {upstream}
+Restart=on-failure
+RestartSec=5
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+ReadOnlyPaths={DNSTT_PRIVATE_KEY} {DNSTT_PUBLIC_KEY}
+
+[Install]
+WantedBy=multi-user.target
+"""
+    DNSTT_UNIT.write_text(unit)
+    os.chmod(DNSTT_UNIT, 0o644)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", "--now", "kudex-dnstt.service"])
+    if service_state("kudex-dnstt.service") != "active":
+        raise RuntimeError("DNSTT unit is not active. Inspect journalctl -u kudex-dnstt.")
+    print("DNSTT is active on UDP/53. Verify DNS delegation before sharing client settings.")
+
+def dnstt_menu():
+    while True:
+        st = read_json(DNSTT_STATE, {})
+        print("\n--- SLOWDNS / DNSTT MANAGER ---")
+        print(f"Server: {'INSTALLED' if dnstt_server_installed() else 'NOT INSTALLED'} | Service: {service_state('kudex-dnstt.service')}")
+        print(f"Zone: {st.get('zone', 'NOT CONFIGURED')} | Upstream: {st.get('upstream', 'NOT CONFIGURED')}")
+        print("[1] Install/build upstream DNSTT server")
+        print("[2] Generate/rotate server keypair")
+        print("[3] Show key status and public key")
+        print("[4] Configure/start DNSTT server")
+        print("[5] Restart DNSTT server")
+        print("[6] Stop/disable DNSTT server")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            install_dnstt_server()
+        elif choice == "2":
+            generate_dnstt_keys()
+        elif choice == "3":
+            dnstt_key_status()
+        elif choice == "4":
+            configure_dnstt_server()
+        elif choice == "5":
+            if service_state("kudex-dnstt.service") == "active":
+                run(["systemctl", "restart", "kudex-dnstt.service"])
+            else:
+                print("DNSTT service is not active; configure it first.")
+        elif choice == "6":
+            if service_state("kudex-dnstt.service") != "unknown" and confirm("Stop and disable DNSTT service?"):
+                run(["systemctl", "disable", "--now", "kudex-dnstt.service"])
+        else:
+            print("Invalid selection.")
+
 def stunnel_config_text(pem_path):
     return f"""foreground = no
 pid = /run/stunnel4-kudex.pid
@@ -1174,7 +1352,7 @@ def server_ip():
 def service_summary():
     checks = (("SSH", ("ssh.service", "sshd.service")), ("NGINX", ("nginx.service",)),
               ("XRAY", ("xray.service",)), ("DROPBEAR", ("dropbear.service",)),
-              ("STUNNEL4", ("stunnel4.service",)))
+              ("STUNNEL4", ("stunnel4.service",)), ("SLOWDNS", ("kudex-dnstt.service",)))
     result = {}
     for label, units in checks:
         states = [service_state(u) for u in units]
@@ -1226,7 +1404,7 @@ def dashboard():
     print(" [13] Update Kudex       [14] Upgrade OS Packages")
     print(" [15] Bandwidth Monitor  [16] Restart Services")
     print(" [17] Ports & Server Info  [18] Stunnel4 & OpenVPN")
-    print(" [19] SSH Security Manager")
+    print(" [19] SSH Security Manager [20] SlowDNS / DNSTT")
     print(" [00] Exit")
     print(cyan+"─"*64+reset)
 
@@ -1327,6 +1505,7 @@ def main():
             elif choice == "17": ports_info()
             elif choice == "18": optional_services_menu()
             elif choice == "19": ssh_security_menu()
+            elif choice == "20": dnstt_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
