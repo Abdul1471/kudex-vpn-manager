@@ -216,3 +216,29 @@ class KudexValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KudexSessionSafetyTests(unittest.TestCase):
+    def test_current_session_is_never_terminable(self):
+        row = {"id": "7", "user": "alice", "tty": "pts/2", "remote": True}
+        self.assertFalse(kudex.session_termination_allowed(row, "7", "pts/2"))
+
+    def test_root_session_is_never_terminable(self):
+        row = {"id": "8", "user": "root", "tty": "pts/3", "remote": True}
+        self.assertFalse(kudex.session_termination_allowed(row, "7", "pts/2"))
+
+    def test_same_terminal_is_protected_even_with_different_session_id(self):
+        row = {"id": "8", "user": "alice", "tty": "pts/2", "remote": True}
+        self.assertFalse(kudex.session_termination_allowed(row, "7", "pts/2"))
+
+    def test_unverified_session_is_not_terminable_when_current_terminal_unknown(self):
+        row = {"id": "8", "user": "alice", "tty": "pts/3", "remote": True}
+        self.assertFalse(kudex.session_termination_allowed(row, "", ""))
+
+    def test_non_remote_ttyless_session_is_not_terminable(self):
+        row = {"id": "8", "user": "alice", "tty": "", "remote": False}
+        self.assertFalse(kudex.session_termination_allowed(row, "7", "pts/2"))
+
+    def test_other_verified_remote_session_can_be_terminated(self):
+        row = {"id": "8", "user": "alice", "tty": "pts/3", "remote": True}
+        self.assertTrue(kudex.session_termination_allowed(row, "7", "pts/2"))
