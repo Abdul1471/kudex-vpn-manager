@@ -803,6 +803,14 @@ def generate_dnstt_keys():
         raise RuntimeError("DNSTT key generation failed:\n" + p.stdout[-2000:])
     os.chmod(DNSTT_PRIVATE_KEY, 0o600)
     os.chmod(DNSTT_PUBLIC_KEY, 0o644)
+    try:
+        import pwd
+        account = pwd.getpwnam("dnstt")
+        os.chown(DNSTT_DIR, account.pw_uid, account.pw_gid)
+        os.chown(DNSTT_PRIVATE_KEY, account.pw_uid, account.pw_gid)
+        os.chmod(DNSTT_DIR, 0o750)
+    except KeyError:
+        os.chmod(DNSTT_DIR, 0o700)
     print("DNSTT keypair generated. Keep server.key private; share only server.pub.")
     if service_state("kudex-dnstt.service") == "active":
         run(["systemctl", "restart", "kudex-dnstt.service"])
