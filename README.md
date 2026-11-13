@@ -82,6 +82,7 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
     [15] BANDWIDTH MONITOR (live; daily/monthly via optional vnStat)
     [16] RESTART MANAGED SERVICES (SSH deliberately excluded)
     [17] PORTS & SERVER INFO
+    [18] STUNNEL4 & OPENVPN
     [00] EXIT SYSTEM
 
 ## Terminal dashboard and monitoring
@@ -97,6 +98,10 @@ Use each protocol menu's **Renew account** option or SSH menu's **Renew account*
 ## Backup scheduling
 
 The Backup Manager supports manual backups and automatic systemd-timer schedules every 12 or 24 hours. Backups include the protected `/etc/kudex` data, Xray configuration and Kudex Nginx site when present. Automatic jobs run as root and store archives under `/var/backups/kudex`. Choose **Disable automatic backups** to stop the timer. The Backup Manager also offers an optional systemd expiry timer that checks timed Xray accounts every five minutes. The current local backup scheduler does not upload archives to Telegram or Google Drive; remote backup integrations are a separate future feature. Treat every archive as sensitive because it contains account credentials.
+
+## Stunnel4 TLS and OpenVPN service controls
+
+Menu **[18] Stunnel4 & OpenVPN** can install Stunnel4 from Ubuntu/Debian repositories after confirmation, then use the configured Let's Encrypt certificate to provide a separate TLS-wrapped SSH listener on TCP/444 forwarding to OpenSSH on loopback TCP/22. This avoids a port conflict with Nginx, which owns HTTPS TCP/443. Kudex stores the combined certificate/key file with root-only permissions and refreshes it from the Certbot deploy hook after certificate renewal. Open TCP/444 in the provider firewall only if you intend to use Stunnel4. The OpenVPN controls only manage an already-installed recognized systemd service; they do not create or replace OpenVPN server/client configuration.
 
 ## Network layout
 
