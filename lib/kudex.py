@@ -15,6 +15,10 @@ BACKUPS = pathlib.Path("/var/backups/kudex")
 XRAY_UNIT = pathlib.Path("/etc/systemd/system/xray.service")
 XRAY_VERSION = "26.10.31"
 PORTS = {"vmess": 10001, "vless": 10002, "trojan": 10003, "sshws": 10004}
+HTTPUPGRADE_PORTS = {"vmess": 10005, "vless": 10006, "trojan": 10007}
+HTTPUPGRADE_PATHS = {"vmess": "/vmess-hu", "vless": "/vless-hu", "trojan": "/trojan-hu"}
+REALITY_PORT = 8443
+REALITY_CONFIG = ETC / "reality.json"
 PATHS = {"vmess": "/vmess", "vless": "/vless", "trojan": "/trojan", "sshws": "/ssh"}
 PROTO_NAMES = {"vmess": "VMess", "vless": "VLESS", "trojan": "Trojan", "sshws": "SSH over WebSocket"}
 
