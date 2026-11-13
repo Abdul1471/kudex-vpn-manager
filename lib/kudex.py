@@ -554,8 +554,9 @@ def protocol_menu(proto):
             except Exception:
                 atomic_json(CLIENTS, [c for c in data if not (c["name"] == name and c["protocol"] == proto)])
                 raise
-            print(f"Account created ({'unlimited' if days == 0 else str(days) + ' day(s)'}). Share link:")
-            print(share_link(item))
+            print(f"Account created ({'unlimited' if days == 0 else str(days) + ' day(s)'}). Connection links:")
+            for label, link in share_links(item):
+                print(f"\n{label}:\n{link}")
         elif choice == "2":
             name = ask("Account label to delete")
             data = clients()
@@ -585,7 +586,9 @@ def protocol_menu(proto):
         elif choice == "4":
             for item in rows:
                 if item.get("enabled", True):
-                    print(f"\n{item['name']} ({expiry_status(item.get('expires_at'))})\n{share_link(item)}")
+                    print(f"\n{item['name']} ({expiry_status(item.get('expires_at'))})")
+                    for label, link in share_links(item):
+                        print(f"{label}:\n{link}")
         elif choice == "5":
             renew_client(proto)
         elif choice == "6":
@@ -593,22 +596,51 @@ def protocol_menu(proto):
         else:
             print("Invalid selection.")
 
-def share_link(client):
-    st = state(); host = st.get("domain") or "YOUR_DOMAIN"
+def share_link(client, transport="websocket"):
+    st = state()
+    host = st.get("domain") or "YOUR_DOMAIN"
+    proto = client["protocol"]
+    if transport == "reality":
+        profile = reality_profile()
+        if proto != "vless" or not profile.get("enabled"):
+            return "VLESS REALITY is not configured."
+        query = urllib.parse.urlencode({
+            "encryption": "none", "flow": "xtls-rprx-vision", "security": "reality",
+            "sni": profile["server_name"], "fp": "chrome", "pbk": profile["public_key"],
+            "sid": profile["short_id"], "type": "tcp"
+        })
+        return f"vless://{client['secret']}@{host}:{REALITY_PORT}?{query}#{urllib.parse.quote(client['name'] + ' REALITY')}"
     if not st.get("tls") or host == "YOUR_DOMAIN":
         return "TLS/domain not configured. Configure DOMAIN & SSL before sharing a connection URI."
-    name = client["name"]; secret = client["secret"]; path = PATHS[client["protocol"]]
-    if client["protocol"] == "vmess":
-        obj = {"v": "2", "ps": name, "add": host, "port": "443", "id": secret,
-               "aid": "0", "scy": "auto", "net": "ws", "type": "none",
-               "host": host, "path": path, "tls": "tls", "sni": host}
+    if transport == "httpupgrade":
+        if not st.get("transports", {}).get(proto, {}).get("httpupgrade", False):
+            return "HTTPUpgrade is not enabled for this protocol."
+        path, net = HTTPUPGRADE_PATHS[proto], "httpupgrade"
+    else:
+        path, net = PATHS[proto], "ws"
+    name = client["name"]
+    secret = client["secret"]
+    if proto == "vmess":
+        obj = {"v": "2", "ps": name + (" HTTPUpgrade" if transport == "httpupgrade" else ""),
+               "add": host, "port": "443", "id": secret, "aid": "0", "scy": "auto",
+               "net": net, "type": "none", "host": host, "path": path, "tls": "tls", "sni": host}
         return "vmess://" + base64.b64encode(json.dumps(obj, separators=(",", ":")).encode()).decode().rstrip("=")
-    query_values = {"type": "ws", "security": "tls", "path": path, "host": host, "sni": host}
-    if client["protocol"] == "vless": query_values["encryption"] = "none"
+    query_values = {"type": net, "security": "tls", "path": path, "host": host, "sni": host}
+    if proto == "vless":
+        query_values["encryption"] = "none"
     query = urllib.parse.urlencode(query_values)
-    if client["protocol"] == "vless":
-        return f"vless://{secret}@{host}:443?{query}#{urllib.parse.quote(name)}"
-    return f"trojan://{secret}@{host}:443?{query}#{urllib.parse.quote(name)}"
+    scheme = "vless" if proto == "vless" else "trojan"
+    suffix = " HTTPUpgrade" if transport == "httpupgrade" else ""
+    return f"{scheme}://{secret}@{host}:443?{query}#{urllib.parse.quote(name + suffix)}"
+
+def share_links(client):
+    links = [("WebSocket + TLS", share_link(client))]
+    proto = client["protocol"]
+    if proto == "vless" and reality_profile().get("enabled"):
+        links.append(("REALITY + Vision", share_link(client, "reality")))
+    if state().get("transports", {}).get(proto, {}).get("httpupgrade", False):
+        links.append(("HTTPUpgrade + TLS", share_link(client, "httpupgrade")))
+    return links
 
 def cleanup_expired_ssh_accounts():
     require_root()
