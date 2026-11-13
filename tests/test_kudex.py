@@ -72,6 +72,54 @@ class KudexValidationTests(unittest.TestCase):
         self.assertEqual(config["inbounds"][3]["protocol"], "dokodemo-door")
         self.assertEqual(config["inbounds"][3]["settings"]["port"], 22)
 
+    def test_httpupgrade_inbound_has_separate_loopback_listener(self):
+        with mock.patch.object(kudex, "state", return_value={"domain": "vpn.example.com"}):
+            inbound = kudex.inbound("vless", [], "httpupgrade")
+        self.assertEqual(inbound["port"], 10006)
+        self.assertEqual(inbound["listen"], "127.0.0.1")
+        self.assertEqual(inbound["streamSettings"]["network"], "httpupgrade")
+        self.assertEqual(inbound["streamSettings"]["httpupgradeSettings"]["path"], "/vless-hu")
+
+    def test_reality_inbound_uses_vision_and_server_private_key(self):
+        profile = {"enabled": True, "target": "www.example.com:443",
+                   "server_name": "www.example.com", "private_key": "private",
+                   "public_key": "public", "short_id": "a1b2c3d4"}
+        clients = [{"name": "alice", "secret": "00000000-0000-4000-8000-000000000000",
+                    "protocol": "vless", "enabled": True}]
+        inbound = kudex.reality_inbound(clients, profile)
+        self.assertEqual(inbound["port"], kudex.REALITY_PORT)
+        self.assertEqual(inbound["listen"], "0.0.0.0")
+        self.assertEqual(inbound["streamSettings"]["security"], "reality")
+        self.assertEqual(inbound["streamSettings"]["realitySettings"]["privateKey"], "private")
+        self.assertEqual(inbound["settings"]["clients"][0]["flow"], "xtls-rprx-vision")
+
+    @mock.patch.object(kudex, "state", return_value={
+        "domain": "vpn.example.com", "tls": True,
+        "transports": {"vless": {"httpupgrade": True}}
+    })
+    def test_httpupgrade_vless_share_link_uses_httpupgrade_transport(self, _state):
+        client = {"name": "alice", "secret": "00000000-0000-4000-8000-000000000000",
+                  "protocol": "vless"}
+        link = kudex.share_link(client, "httpupgrade")
+        self.assertIn("vless://", link)
+        self.assertIn("type=httpupgrade", link)
+        self.assertIn("vless-hu", link)
+
+    @mock.patch.object(kudex, "state", return_value={"domain": "vpn.example.com"})
+    @mock.patch.object(kudex, "reality_profile", return_value={
+        "enabled": True, "server_name": "www.example.com", "public_key": "public-key",
+        "short_id": "a1b2c3d4"
+    })
+    def test_reality_vless_share_link_contains_client_parameters(self, _profile, _state):
+        client = {"name": "alice", "secret": "00000000-0000-4000-8000-000000000000",
+                  "protocol": "vless"}
+        link = kudex.share_link(client, "reality")
+        self.assertIn(":8443?", link)
+        self.assertIn("security=reality", link)
+        self.assertIn("flow=xtls-rprx-vision", link)
+        self.assertIn("pbk=public-key", link)
+        self.assertIn("sid=a1b2c3d4", link)
+
     @mock.patch.object(kudex, "read_json", return_value={"keep_last": 12})
     def test_backup_retention_policy_reads_valid_count(self, _read):
         self.assertEqual(kudex.backup_retention_count(), 12)
