@@ -525,8 +525,8 @@ def configure_reality():
     result = subprocess.run([binary, "x25519"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if result.returncode:
         raise RuntimeError("Xray could not generate REALITY keys: " + result.stdout[-1000:])
-    private_match = re.search(r"(?im)^\\s*(?:PrivateKey|Private key)\\s*:\\s*([A-Za-z0-9_-]+)\\s*$", result.stdout)
-    public_match = re.search(r"(?im)^\\s*(?:Password|PublicKey|Public key)\\s*:\\s*([A-Za-z0-9_-]+)\\s*$", result.stdout)
+    private_match = re.search(r"(?im)^\s*(?:PrivateKey|Private key)\s*:\s*([A-Za-z0-9_-]+)\s*$", result.stdout)
+    public_match = re.search(r"(?im)^\s*(?:Password|PublicKey|Public key)\s*:\s*([A-Za-z0-9_-]+)\s*$", result.stdout)
     if not private_match or not public_match:
         raise RuntimeError("Unrecognized Xray x25519 output; no REALITY settings were changed.")
     previous = reality_profile()
