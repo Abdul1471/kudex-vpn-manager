@@ -251,3 +251,31 @@ Menu **[31] Active Session Manager** lists sessions reported by systemd-logind a
 ## TCP connection-abuse guard
 
 Menu **[30] SSH / Host Protection** includes an optional nftables TCP connection-abuse guard. It checks established TCP connections once per minute and temporarily bans a public source IP when its concurrent connection count reaches the configured threshold. Private, loopback, link-local, reserved, multicast, and explicitly allowlisted addresses are exempt. Kudex creates and removes only its own dedicated nftables table; it does not flush UFW, Docker, or other firewall rules. Keep the administrator's public IP/CIDR allowlisted. This is a basic per-source connection guard, not volumetric DDoS protection, and cannot stop attacks that saturate the provider network before reaching the VPS.
+
+
+## Fresh VPS installation and first-run checklist
+
+Kudex is designed for a clean Ubuntu 22.04/24.04 LTS or Debian 12 VPS. Start with a non-production test server and keep the provider console available.
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git
+git clone https://github.com/Abdul1471/kudex-vpn-manager.git
+cd kudex-vpn-manager
+sudo bash install.sh
+sudo kudex
+```
+
+The installer installs the base packages and keeps OpenSSH on its existing port. Dropbear is configured separately on TCP/2222. Keep your original SSH session open and confirm a second login works before closing it. Open only the provider-firewall ports for services you deliberately enable.
+
+Suggested first-run order:
+1. Run diagnostics and review the dashboard.
+2. Set the server domain and verify its DNS A/AAAA records point to the VPS.
+3. Request TLS and validate Nginx.
+4. Install/update Xray and apply the generated configuration.
+5. Create one test account for each protocol you intend to use; import the share links into a compatible client.
+6. Test expiry, disable/enable, backup and restore on disposable accounts.
+7. Enable optional services one at a time, checking service status and listening ports after each change.
+8. Keep a record of expected ports and remove services you do not intend to expose.
+
+Do not enable unauthenticated public UDPGW, proxy listeners, or firewall automation without reviewing their warnings and access controls. Licensing and per-account three-strike lockout are not included in this release.
