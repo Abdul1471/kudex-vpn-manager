@@ -1263,6 +1263,119 @@ def openvpn_units():
             available.append(unit)
     return available
 
+SQUID_CONFIG = pathlib.Path("/etc/squid/squid.conf")
+SQUID_PASSWORDS = pathlib.Path("/etc/squid/passwd")
+SQUID_PORT = 8880
+
+def squid_proxy_config():
+    return """# Managed by Kudex VPN Manager. Local changes are backed up before replacement.
+http_port 0.0.0.0:8880
+auth_param basic program /usr/lib/squid/basic_ncsa_auth /etc/squid/passwd
+auth_param basic realm Kudex Authenticated Proxy
+auth_param basic credentialsttl 2 hours
+acl kudex_authenticated proxy_auth REQUIRED
+http_access allow localhost
+http_access allow kudex_authenticated
+http_access deny all
+cache deny all
+via off
+forwarded_for delete
+"""
+
+def squid_proxy_installed():
+    return bool(shutil.which("squid") and shutil.which("htpasswd") and
+                pathlib.Path("/usr/lib/squid/basic_ncsa_auth").exists())
+
+def squid_proxy_configure():
+    require_root()
+    if not confirm("Install Squid and Apache htpasswd tools for an authenticated HTTP proxy on TCP/8880?"):
+        return
+    run(["apt-get", "update"])
+    run(["apt-get", "install", "-y", "--no-install-recommends", "squid", "apache2-utils"])
+    if not squid_proxy_installed():
+        raise RuntimeError("Squid or its basic_ncsa_auth helper is missing after installation.")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        try:
+            probe.bind(("0.0.0.0", SQUID_PORT))
+        except OSError as exc:
+            raise RuntimeError(f"TCP/{SQUID_PORT} is already in use; free the port before configuring Squid.") from exc
+    SQUID_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    if SQUID_CONFIG.exists():
+        stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        shutil.copy2(SQUID_CONFIG, SQUID_CONFIG.with_name(f"squid.conf.kudex-backup-{stamp}"))
+    SQUID_PASSWORDS.touch(mode=0o640, exist_ok=True)
+    os.chown(SQUID_PASSWORDS, 0, shutil.getgrnam("proxy").gr_gid if hasattr(shutil, "getgrnam") else 13)
+    SQUID_CONFIG.write_text(squid_proxy_config())
+    os.chmod(SQUID_CONFIG, 0o640)
+    test = subprocess.run(["squid", "-k", "parse"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if test.returncode:
+        raise RuntimeError("Squid rejected the generated configuration:\\n" + test.stdout[-2500:])
+    run(["systemctl", "enable", "--now", "squid.service"])
+    run(["systemctl", "restart", "squid.service"])
+    print("Authenticated Squid proxy configured on TCP/8880. Add a proxy user before connecting.")
+
+def squid_proxy_add_user():
+    require_root()
+    if not squid_proxy_installed() or not SQUID_CONFIG.exists():
+        print("Configure/install the Squid proxy first.")
+        return
+    username = ask("Proxy username")
+    if not valid_name(username):
+        raise RuntimeError("Username must be 3–32 characters and start with a letter.")
+    password = getpass.getpass("Proxy password (minimum 12 characters): ")
+    if len(password) < 12 or "\\n" in password or "\\r" in password:
+        raise RuntimeError("Use a password of at least 12 characters without line breaks.")
+    helper = shutil.which("htpasswd")
+    cmd = [helper, "-B", "-i"]
+    if not SQUID_PASSWORDS.exists() or SQUID_PASSWORDS.stat().st_size == 0:
+        cmd.append("-c")
+    cmd += [str(SQUID_PASSWORDS), username]
+    proc = subprocess.run(cmd, input=password + "\\n", text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if proc.returncode:
+        raise RuntimeError("Could not create the proxy account: " + proc.stdout[-1500:])
+    os.chmod(SQUID_PASSWORDS, 0o640)
+    run(["systemctl", "reload", "squid.service"])
+    print(f"Authenticated proxy account '{username}' added.")
+
+def squid_proxy_list_users():
+    if not SQUID_PASSWORDS.exists():
+        print("No proxy users configured.")
+        return
+    users = [line.split(":", 1)[0] for line in SQUID_PASSWORDS.read_text().splitlines() if ":" in line]
+    print("\\nProxy users:")
+    for username in users:
+        print(" - " + username)
+    if not users:
+        print("No proxy users configured.")
+
+def squid_proxy_menu():
+    while True:
+        print("\\n--- AUTHENTICATED HTTP PROXY ---")
+        print(f"Squid service: {service_state('squid.service')} | Port: TCP/{SQUID_PORT}")
+        print("[1] Install/configure authenticated proxy")
+        print("[2] Add or reset proxy user")
+        print("[3] List proxy usernames")
+        print("[4] Restart Squid")
+        print("[5] Stop Squid")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            squid_proxy_configure()
+        elif choice == "2":
+            squid_proxy_add_user()
+        elif choice == "3":
+            squid_proxy_list_users()
+        elif choice == "4":
+            if confirm("Restart Squid and disconnect active proxy sessions?"):
+                run(["systemctl", "restart", "squid.service"])
+        elif choice == "5":
+            if confirm("Stop the authenticated HTTP proxy?"):
+                run(["systemctl", "stop", "squid.service"])
+        else:
+            print("Invalid selection.")
+
 def optional_services_menu():
     while True:
         print("\n--- STUNNEL4 & OPENVPN ---")
@@ -2175,6 +2288,7 @@ def ports_info():
             print(f"{proto.upper()} HTTPUpgrade: 127.0.0.1:{port} {HTTPUPGRADE_PATHS[proto]} via Nginx/443")
     for proto in ("vmess", "vless", "trojan", "sshws"):
         print(f"{PROTO_NAMES[proto]:<14}: 127.0.0.1:{PORTS[proto]} {PATHS[proto]}")
+    print(f"Authenticated HTTP proxy: TCP/{SQUID_PORT} (when Squid is configured)")
     print("\n--- LISTENING SOCKETS ---")
     if shutil.which("ss"): run(["ss", "-lntup"], check=False)
 
@@ -2387,6 +2501,7 @@ def main():
             elif choice == "22": auto_reboot_menu()
             elif choice == "23": speed_test_menu()
             elif choice == "24": transport_manager_menu()
+            elif choice == "25": squid_proxy_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
