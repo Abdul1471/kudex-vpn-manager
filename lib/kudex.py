@@ -2011,6 +2011,9 @@ def backup(auto_upload=False):
             sync_backup_to_mount(target)
         except (RuntimeError, OSError) as exc:
             print(f"[BACKUP SYNC WARNING] {exc}")
+    if google_drive_settings():
+        try: google_drive_sync(target)
+        except (RuntimeError, OSError) as exc: print(f"[GOOGLE DRIVE WARNING] {exc}")
     if auto_upload and telegram_settings():
         try:
             upload_telegram_backup(target)
@@ -2374,7 +2377,7 @@ def server_ip():
 def service_summary():
     checks = (("SSH", ("ssh.service", "sshd.service")), ("NGINX", ("nginx.service",)),
               ("XRAY", ("xray.service",)), ("DROPBEAR", ("dropbear.service",)),
-              ("STUNNEL4", ("stunnel4.service",)), ("SLOWDNS", ("kudex-dnstt.service",)), ("SOCKS5", ("danted.service",)))
+              ("STUNNEL4", ("stunnel4.service",)), ("SLOWDNS", ("kudex-dnstt.service",)), ("SOCKS5", ("danted.service",)), ("BADVPN", ("kudex-badvpn.service",)), ("FAIL2BAN", ("fail2ban.service",)))
     result = {}
     for label, units in checks:
         states = [service_state(u) for u in units]
@@ -2439,6 +2442,8 @@ def dashboard():
     print(" [23] Server Speed Test      [24] Xray Transport Manager")
     print(" [25] Authenticated HTTP Proxy")
     print(" [26] Dante SOCKS5 Proxy")
+    print(" [27] BadVPN UDP Gateway   [28] OpenVPN Provisioning")
+    print(" [29] Google Drive Backup  [30] SSH / Host Protection")
     print(" [00] Exit")
     print(cyan+"─"*64+reset)
 
@@ -2656,6 +2661,279 @@ def expanded_service_menu():
         label, unit = units[int(choice)-1]
         service_menu(label, unit)
 
+
+# --- Additional services and cloud backup integrations ---------------------
+BADVPN_CONFIG = ETC / "badvpn.json"
+BADVPN_UNIT = pathlib.Path("/etc/systemd/system/kudex-badvpn.service")
+
+def badvpn_configure():
+    require_root()
+    binary = shutil.which("badvpn-udpgw")
+    if not binary:
+        if not confirm("Install BadVPN from Ubuntu/Debian repositories?"): return
+        run(["apt-get", "update"])
+        run(["apt-get", "install", "-y", "--no-install-recommends", "badvpn"])
+        binary = shutil.which("badvpn-udpgw")
+    if not binary: raise RuntimeError("badvpn-udpgw was not provided by the installed package.")
+    old = read_json(BADVPN_CONFIG, {"bind": "127.0.0.1", "port": 7300})
+    raw = ask("Gateway TCP port (7100-7300)", str(old.get("port", 7300)))
+    if not raw.isdigit() or not 7100 <= int(raw) <= 7300: raise RuntimeError("Choose a TCP port from 7100 to 7300.")
+    bind = ask("Listen address (127.0.0.1 safest; 0.0.0.0 exposes publicly)", old.get("bind", "127.0.0.1"))
+    if bind not in ("127.0.0.1", "0.0.0.0"): raise RuntimeError("Only 127.0.0.1 or 0.0.0.0 is supported.")
+    port = int(raw)
+    if bind == "0.0.0.0" and not confirm("BadVPN UDPGW has no client authentication. Public exposure can be abused. Continue?"): return
+    if service_state("kudex-badvpn.service") != "active":
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try: probe.bind((bind, port))
+            except OSError as exc: raise RuntimeError(f"TCP/{port} is already occupied.") from exc
+    atomic_json(BADVPN_CONFIG, {"bind": bind, "port": port})
+    unit = f"""[Unit]
+Description=Kudex BadVPN UDP Gateway
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+ExecStart={binary} --listen-addr {bind} --listen-port {port} --max-clients 256 --max-connections-for-client 10
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+CapabilityBoundingSet=
+[Install]
+WantedBy=multi-user.target
+"""
+    BADVPN_UNIT.write_text(unit); os.chmod(BADVPN_UNIT, 0o644)
+    run(["systemctl", "daemon-reload"]); run(["systemctl", "enable", "--now", "kudex-badvpn.service"])
+    if service_state("kudex-badvpn.service") != "active": raise RuntimeError("BadVPN did not start; inspect journalctl -u kudex-badvpn.")
+    print(f"BadVPN UDPGW active on {bind}:TCP/{port}. Provider firewall changes are manual.")
+
+def badvpn_menu():
+    while True:
+        c = read_json(BADVPN_CONFIG, {})
+        print(f"\\n--- BADVPN UDP GATEWAY ---\\nService: {service_state('kudex-badvpn.service')} | {c.get('bind','not configured')}:{c.get('port','—')}")
+        print("[1] Install/configure [2] Restart [3] Stop [4] Disable at boot [0] Back")
+        x = input("Select: ").strip()
+        if x == "0": return
+        if x == "1": badvpn_configure()
+        elif x == "2":
+            if service_state("kudex-badvpn.service") == "unknown": print("Configure BadVPN first.")
+            else: run(["systemctl", "restart", "kudex-badvpn.service"])
+        elif x == "3":
+            if confirm("Stop BadVPN and disconnect clients?"): run(["systemctl", "stop", "kudex-badvpn.service"])
+        elif x == "4":
+            if confirm("Disable BadVPN at boot?"): run(["systemctl", "disable", "--now", "kudex-badvpn.service"])
+        else: print("Invalid selection.")
+
+OPENVPN_EASYRSA = pathlib.Path("/etc/kudex/openvpn-easy-rsa")
+OPENVPN_SERVER_DIR = pathlib.Path("/etc/openvpn/server")
+OPENVPN_CLIENT_DIR = pathlib.Path("/etc/kudex/openvpn-clients")
+OPENVPN_UNIT = "openvpn-server@kudex.service"
+
+def openvpn_easyrsa(*args):
+    executable = OPENVPN_EASYRSA / "easyrsa"
+    env = os.environ.copy(); env["EASYRSA_BATCH"] = "1"; env["EASYRSA_PKI"] = str(OPENVPN_EASYRSA / "pki")
+    proc = subprocess.run([str(executable), *args], cwd=str(OPENVPN_EASYRSA), env=env, text=True,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    if proc.returncode: raise RuntimeError("Easy-RSA failed: " + proc.stdout[-2500:])
+    return proc.stdout
+
+def openvpn_provision():
+    require_root()
+    if (OPENVPN_SERVER_DIR / "kudex.conf").exists(): raise RuntimeError("Kudex OpenVPN is already provisioned; refusing to overwrite it.")
+    if OPENVPN_EASYRSA.exists() and any(OPENVPN_EASYRSA.iterdir()): raise RuntimeError("Existing Easy-RSA data found; refusing to overwrite a CA.")
+    if not confirm("Install OpenVPN/Easy-RSA and create a UDP/2200 certificate-authenticated server? No NAT or firewall rules will be changed."): return
+    run(["apt-get", "update"]); run(["apt-get", "install", "-y", "--no-install-recommends", "openvpn", "easy-rsa"])
+    easyrsa = shutil.which("easyrsa") or "/usr/share/easy-rsa/easyrsa"
+    if not pathlib.Path(easyrsa).exists(): raise RuntimeError("Easy-RSA executable not found.")
+    OPENVPN_EASYRSA.mkdir(mode=0o700, parents=True, exist_ok=True); shutil.copy2(easyrsa, OPENVPN_EASYRSA / "easyrsa")
+    (OPENVPN_EASYRSA / "vars").write_text("set_var EASYRSA_ALGO ec\\nset_var EASYRSA_CURVE prime256v1\\nset_var EASYRSA_DIGEST sha256\\n")
+    os.chmod(OPENVPN_EASYRSA / "vars", 0o600)
+    openvpn_easyrsa("init-pki"); openvpn_easyrsa("build-ca", "nopass"); openvpn_easyrsa("build-server-full", "server", "nopass")
+    pki = OPENVPN_EASYRSA / "pki"
+    OPENVPN_SERVER_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    server_dir = OPENVPN_SERVER_DIR / "kudex"; server_dir.mkdir(mode=0o700, exist_ok=True)
+    for source, target in ((pki/"ca.crt",server_dir/"ca.crt"),(pki/"issued/server.crt",server_dir/"server.crt"),(pki/"private/server.key",server_dir/"server.key")):
+        shutil.copy2(source,target); os.chmod(target,0o600)
+    tls = server_dir / "tls-crypt.key"; run(["openvpn","--genkey","secret",str(tls)]); os.chmod(tls,0o600)
+    conf = """# Kudex-managed; routed VPN subnet only, no default-route push or NAT.
+port 2200
+proto udp4
+dev tun
+topology subnet
+server 10.8.0.0 255.255.255.0
+ca /etc/openvpn/server/kudex/ca.crt
+cert /etc/openvpn/server/kudex/server.crt
+key /etc/openvpn/server/kudex/server.key
+dh none
+ecdh-curve prime256v1
+tls-crypt /etc/openvpn/server/kudex/tls-crypt.key
+tls-version-min 1.2
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+auth SHA256
+keepalive 10 60
+persist-key
+persist-tun
+user nobody
+group nogroup
+verb 3
+"""
+    target = OPENVPN_SERVER_DIR / "kudex.conf"; target.write_text(conf); os.chmod(target,0o600)
+    run(["systemctl","enable","--now",OPENVPN_UNIT])
+    if service_state(OPENVPN_UNIT) != "active": raise RuntimeError("OpenVPN failed to start; inspect journalctl -u openvpn-server@kudex.")
+    print("OpenVPN is active on UDP/2200. NAT, forwarding and firewall were intentionally left unchanged.")
+
+def openvpn_create_client():
+    require_root()
+    if not (OPENVPN_SERVER_DIR/"kudex.conf").exists(): print("Provision OpenVPN first."); return
+    name = ask("Client name")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{3,32}",name): raise RuntimeError("Use 3-32 letters, digits, '_' or '-'.")
+    remote = ask("Public server hostname or IP",state().get("domain") or server_ip())
+    try: ipaddress.ip_address(remote); valid = True
+    except ValueError: valid = valid_domain(remote)
+    if not valid: raise RuntimeError("Enter a valid IP address or hostname.")
+    pki=OPENVPN_EASYRSA/"pki"; cert=pki/"issued"/(name+".crt"); key=pki/"private"/(name+".key")
+    if cert.exists() or key.exists(): raise RuntimeError("That client already exists.")
+    openvpn_easyrsa("build-client-full",name,"nopass")
+    profile=f"""client
+dev tun
+proto udp
+remote {remote} 2200
+resolv-retry infinite
+nobind
+persist-key
+persist-tun
+remote-cert-tls server
+verify-x509-name server name
+auth SHA256
+data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
+verb 3
+<ca>
+{(pki/'ca.crt').read_text()}</ca>
+<cert>
+{cert.read_text()}</cert>
+<key>
+{key.read_text()}</key>
+<tls-crypt>
+{(OPENVPN_SERVER_DIR/'kudex/tls-crypt.key').read_text()}</tls-crypt>
+"""
+    OPENVPN_CLIENT_DIR.mkdir(mode=0o700,parents=True,exist_ok=True)
+    out=OPENVPN_CLIENT_DIR/(name+".ovpn"); out.write_text(profile); os.chmod(out,0o600)
+    print("Client profile created: "+str(out)+". It contains a private key; transfer it securely.")
+
+def openvpn_menu():
+    while True:
+        print(f"\\n--- OPENVPN PROVISIONING ---\\nServer: {service_state(OPENVPN_UNIT)} | UDP/2200")
+        print("[1] Provision server [2] Create client profile [3] List client profiles [4] Restart [5] Stop [0] Back")
+        x=input("Select: ").strip()
+        if x=="0": return
+        if x=="1": openvpn_provision()
+        elif x=="2": openvpn_create_client()
+        elif x=="3":
+            for p in sorted(OPENVPN_CLIENT_DIR.glob("*.ovpn")) if OPENVPN_CLIENT_DIR.exists() else []: print(" - "+p.name)
+        elif x=="4":
+            if confirm("Restart OpenVPN and disconnect clients?"): run(["systemctl","restart",OPENVPN_UNIT])
+        elif x=="5":
+            if confirm("Stop OpenVPN?"): run(["systemctl","stop",OPENVPN_UNIT])
+        else: print("Invalid selection.")
+
+GOOGLE_DRIVE_CONFIG = ETC / "google-drive.json"
+
+def google_drive_settings():
+    data=read_json(GOOGLE_DRIVE_CONFIG,{})
+    remote=data.get("remote",""); folder=data.get("folder","KudexBackups")
+    if not isinstance(remote,str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}",remote): return None
+    if not isinstance(folder,str) or not folder or folder.startswith("/") or ".." in pathlib.PurePosixPath(folder).parts: return None
+    return {"remote":remote,"folder":folder}
+
+def google_drive_sync(archive):
+    require_root(); source=pathlib.Path(archive)
+    if source.parent.resolve()!=BACKUPS.resolve() or not source.is_file() or source.is_symlink(): raise RuntimeError("Only a local regular Kudex archive can be uploaded.")
+    if not re.fullmatch(r"kudex-[0-9]{8}-[0-9]{6}\\.tar\\.gz",source.name): raise RuntimeError("Unrecognized backup filename.")
+    cfg=google_drive_settings()
+    if not cfg: raise RuntimeError("Google Drive is not configured.")
+    binary=shutil.which("rclone")
+    if not binary: raise RuntimeError("rclone is not installed.")
+    target=f"{cfg['remote']}:{cfg['folder'].strip('/')}/{source.name}"
+    run([binary,"copyto","--immutable",str(source),target])
+    print("Google Drive backup uploaded: "+target)
+    return target
+
+def google_drive_menu():
+    require_root()
+    while True:
+        cfg=google_drive_settings()
+        print("\\n--- GOOGLE DRIVE BACKUP ---")
+        print("Configuration: "+(f"{cfg['remote']}:{cfg['folder']}" if cfg else "NOT CONFIGURED"))
+        print("[1] Install rclone / open secure remote setup")
+        print("[2] Select existing remote and folder")
+        print("[3] Upload latest backup")
+        print("[4] Test remote")
+        print("[5] Disable automatic copies")
+        print("[0] Back")
+        x=input("Select: ").strip()
+        if x=="0": return
+        if x=="1":
+            if not shutil.which("rclone"):
+                if not confirm("Install rclone from Ubuntu/Debian repositories?"): continue
+                run(["apt-get","update"]); run(["apt-get","install","-y","--no-install-recommends","rclone"])
+            os.umask(0o077); run(["rclone","config"])
+        elif x=="2":
+            if not shutil.which("rclone"): print("Install rclone first."); continue
+            result=subprocess.run(["rclone","listremotes"],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+            if result.returncode: raise RuntimeError("rclone listremotes failed: "+result.stdout[-1000:])
+            remotes=[v.strip().rstrip(":") for v in result.stdout.splitlines() if v.strip()]
+            if not remotes: print("No remotes configured. Use option 1."); continue
+            print("Available: "+", ".join(remotes)); remote=ask("Remote name",remotes[0])
+            if remote not in remotes: print("Choose a listed remote."); continue
+            folder=ask("Remote folder path","KudexBackups")
+            if not folder or folder.startswith("/") or ".." in pathlib.PurePosixPath(folder).parts: print("Use a relative path without '..'."); continue
+            atomic_json(GOOGLE_DRIVE_CONFIG,{"remote":remote,"folder":folder})
+        elif x=="3":
+            archives=sorted(BACKUPS.glob("kudex-*.tar.gz"),reverse=True)
+            if not archives: print("Create a local backup first.")
+            else: google_drive_sync(archives[0])
+        elif x=="4":
+            if not cfg or not shutil.which("rclone"): print("Configure Drive first.")
+            else: run(["rclone","lsd",f"{cfg['remote']}:{cfg['folder']}"])
+        elif x=="5":
+            if GOOGLE_DRIVE_CONFIG.exists() and confirm("Disable automatic Drive copies? Existing cloud backups are preserved."): GOOGLE_DRIVE_CONFIG.unlink()
+        else: print("Invalid selection.")
+
+def install_fail2ban_protection():
+    require_root()
+    if not confirm("Enable Fail2ban SSH protection: ban source IP after 3 failures in 10 minutes for 1 hour? This is not per-account locking."): return
+    run(["apt-get","update"]); run(["apt-get","install","-y","--no-install-recommends","fail2ban"])
+    ignore=["127.0.0.1/8","::1"]
+    peer=os.environ.get("SSH_CONNECTION","").split()
+    if peer:
+        try: ignore.append(str(ipaddress.ip_address(peer[0])))
+        except ValueError: pass
+    path=pathlib.Path("/etc/fail2ban/jail.d/kudex-sshd.local"); path.parent.mkdir(parents=True,exist_ok=True)
+    if path.exists():
+        stamp=datetime.datetime.now().strftime("%Y%m%d-%H%M%S"); shutil.copy2(path,path.with_name(path.name+".backup-"+stamp))
+    path.write_text("[sshd]\\nenabled = true\\nbackend = systemd\\nport = ssh\\nmaxretry = 3\\nfindtime = 10m\\nbantime = 1h\\nignoreip = "+" ".join(ignore)+"\\n")
+    os.chmod(path,0o644); run(["systemctl","enable","--now","fail2ban.service"]); run(["fail2ban-client","reload"])
+    print("Fail2ban SSH jail active: 3 failures / 10 minutes / 1-hour source-IP ban.")
+    print("This is brute-force protection, not general DDoS mitigation or account-based three-strike locking.")
+
+def host_protection_menu():
+    while True:
+        print(f"\\n--- SSH / HOST PROTECTION ---\\nFail2ban: {service_state('fail2ban.service')}")
+        print("[1] Enable SSH protection [2] Show SSH jail [3] Remove Kudex jail [0] Back")
+        x=input("Select: ").strip()
+        if x=="0": return
+        if x=="1": install_fail2ban_protection()
+        elif x=="2":
+            if shutil.which("fail2ban-client"): run(["fail2ban-client","status","sshd"],check=False)
+            else: print("Fail2ban is not installed.")
+        elif x=="3":
+            p=pathlib.Path("/etc/fail2ban/jail.d/kudex-sshd.local")
+            if p.exists() and confirm("Remove only Kudex's Fail2ban jail?"): p.unlink(); run(["fail2ban-client","reload"],check=False)
+        else: print("Invalid selection.")
+
+
 def main():
     require_root(); ensure_dirs()
     if len(sys.argv) > 1:
@@ -2702,6 +2980,10 @@ def main():
             elif choice == "24": transport_manager_menu()
             elif choice == "25": squid_proxy_menu()
             elif choice == "26": dante_socks_menu()
+            elif choice == "27": badvpn_menu()
+            elif choice == "28": openvpn_menu()
+            elif choice == "29": google_drive_menu()
+            elif choice == "30": host_protection_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
