@@ -76,3 +76,12 @@ Already present in Kudex:
    restore workflow where supported.
 6. Dashboard, port configuration, installer, supported-platform documentation,
    and end-to-end verification.
+
+
+## Newly implemented in Kudex
+
+- [x] Authenticated HTTP proxy using Squid on TCP/8880.
+- [x] Proxy username management with bcrypt password hashes.
+- [x] Deny-by-default proxy ACL; unauthenticated remote proxy access is rejected.
+- [x] Squid configuration parse check and backup before activation.
+- [ ] SOCKS5 (Dante), OHP, BadVPN UDPGW, OpenVPN provisioning, license service, anti-multilogin, DDoS controls, and cloud Drive integration remain outstanding.
