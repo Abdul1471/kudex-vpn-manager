@@ -24,8 +24,8 @@ Already present in Kudex:
 | Reference capability | Kudex status | Required work |
 |---|---|---|
 | VMess / VLESS / Trojan WebSocket | Implemented | Keep compatibility tests and client URI tests |
-| VLESS Reality / XTLS-style Reality transport | Not implemented | Add validated Reality inbound model, key generation, server-name/short-ID handling, client URI generation, and Xray config tests |
-| HTTPUpgrade transport | Not implemented | Add transport selection and matching reverse-proxy routing; test against pinned Xray schema |
+| VLESS Reality / XTLS-style Reality transport | Implemented (opt-in, VLESS + Vision) | Separate TCP/8443 listener; generated X25519 keys; configured target/serverName/short ID; share URI and config unit tests. Still requires live-core/VPS verification |
+| HTTPUpgrade transport | Implemented (opt-in for VMess/VLESS/Trojan) | Loopback listeners TCP/10005–10007, Nginx TLS routes, client links and unit tests. Still requires live-core/VPS verification |
 | SSH, Dropbear, Stunnel4 | Partial | Align configurable listener ports while detecting conflicts and preserving existing SSH access |
 | SSH-WS on TCP/80 | Not implemented as a dedicated listener | Add an explicit listener option with conflict checks; do not silently take Nginx port 80 |
 | HTTPS VPN listener on TCP/443 | Partial | Existing Nginx terminates TLS; add supported transport routing without breaking ACME |
@@ -68,7 +68,7 @@ Already present in Kudex:
 
 ## Delivery sequence
 
-1. Protocol engine: Reality and HTTPUpgrade, share links, schema/URI tests.
+1. Protocol engine: Reality and HTTPUpgrade implemented in the application; finish live-core compatibility and VPS integration tests.
 2. Proxy services: authenticated HTTP proxy, Dante SOCKS5, OHP, BadVPN UDPGW.
 3. Access controls: expiry policy, reliable session tracking, three-strike lock.
 4. Host protection: conservative connection-rate protection and diagnostics.
