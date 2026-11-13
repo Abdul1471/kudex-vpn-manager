@@ -305,7 +305,13 @@ def configure_domain():
         apply_xray()
     hook = pathlib.Path("/etc/letsencrypt/renewal-hooks/deploy/kudex-nginx-reload")
     hook.parent.mkdir(parents=True, exist_ok=True)
-    hook.write_text("#!/bin/sh\nsystemctl reload nginx.service\n")
+    hook.write_text("#!/bin/sh\nset -eu\nsystemctl reload nginx.service\n"
+                    "if [ -f /etc/stunnel/kudex.conf ]; then\n"
+                    "  cat /etc/letsencrypt/live/" + domain + "/fullchain.pem "
+                    "/etc/letsencrypt/live/" + domain + "/privkey.pem > /etc/stunnel/kudex.pem\n"
+                    "  chmod 600 /etc/stunnel/kudex.pem\n"
+                    "  systemctl restart stunnel4.service || true\n"
+                    "fi\n")
     os.chmod(hook, 0o755)
     print("TLS certificate issued. Certbot renewal timer will reload Nginx after renewal.")
 
@@ -583,8 +589,8 @@ def ssh_menu():
 
 def stunnel_config_text(pem_path):
     return f"""foreground = no
-pid = /run/stunnel4/kudex.pid
-output = /var/log/stunnel4/kudex.log
+pid = /run/stunnel4-kudex.pid
+output = /var/log/stunnel4-kudex.log
 debug = 4
 
 [ssh]
@@ -612,6 +618,7 @@ def configure_stunnel():
         run(["apt-get", "install", "-y", "stunnel4"])
     config_dir = pathlib.Path("/etc/stunnel")
     config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    pathlib.Path("/var/log/stunnel4").mkdir(mode=0o750, parents=True, exist_ok=True)
     pem = config_dir / "kudex.pem"
     pem.write_bytes(fullchain.read_bytes() + b"\n" + private_key.read_bytes())
     os.chmod(pem, 0o600)
@@ -1007,13 +1014,14 @@ def server_ip():
 
 def service_summary():
     checks = (("SSH", ("ssh.service", "sshd.service")), ("NGINX", ("nginx.service",)),
-              ("XRAY", ("xray.service",)), ("DROPBEAR", ("dropbear.service",)))
+              ("XRAY", ("xray.service",)), ("DROPBEAR", ("dropbear.service",)),
+              ("STUNNEL4", ("stunnel4.service",)))
     result = {}
     for label, units in checks:
         states = [service_state(u) for u in units]
         result[label] = "RUNNING" if "active" in states else ("NOT INSTALLED" if all(x == "unknown" for x in states) else "STOPPED")
     st = state()
-    result["SSH-WS"] = "DISABLED" if not st.get("protocols", {}).get("sshws", True) else (
+    openvpn = openvpn_units() if "openvpn_units" in globals() else []\n    result["OPENVPN"] = "RUNNING" if any(service_state(u) == "active" for u in openvpn) else ("STOPPED" if openvpn else "NOT INSTALLED")\n    result["SSH-WS"] = "DISABLED" if not st.get("protocols", {}).get("sshws", True) else (
         "RUNNING" if result["XRAY"] == "RUNNING" and st.get("tls") else "WAITING FOR TLS")
     return result
 
