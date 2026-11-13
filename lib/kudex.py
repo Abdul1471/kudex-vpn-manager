@@ -1134,6 +1134,80 @@ def upload_telegram_backup(archive):
         raise RuntimeError("Telegram upload failed: " + str(result.get("description", "request rejected"))[:300])
     print("Backup uploaded to Telegram: " + path.name)
 
+def telegram_incoming_backups():
+    settings = telegram_settings()
+    if not settings:
+        raise RuntimeError("Telegram is not configured.")
+    if not re.fullmatch(r"-?[0-9]{1,20}", settings["chat_id"]):
+        raise RuntimeError("Use a numeric private-chat ID for Telegram restore.")
+    updates = telegram_api("getUpdates", settings["bot_token"], {"limit": "100", "timeout": "0"})
+    found = []
+    for update in updates or []:
+        message = update.get("message", {})
+        document = message.get("document", {})
+        if str(message.get("chat", {}).get("id", "")) != settings["chat_id"]:
+            continue
+        name = str(document.get("file_name", ""))
+        if document and re.fullmatch(r"kudex-[0-9]{8}-[0-9]{6}\.tar\.gz", name):
+            found.append({"file_id": document["file_id"], "name": name,
+                          "date": int(message.get("date", 0)), "size": int(document.get("file_size", 0))})
+    return sorted(found, key=lambda item: item["date"], reverse=True)
+
+def download_telegram_backup(file_id, filename):
+    settings = telegram_settings()
+    if not settings or not re.fullmatch(r"kudex-[0-9]{8}-[0-9]{6}\.tar\.gz", filename):
+        raise RuntimeError("Telegram backup configuration or filename is invalid.")
+    info = telegram_api("getFile", settings["bot_token"], {"file_id": file_id})
+    remote_path = info.get("file_path", "")
+    if not remote_path or ".." in pathlib.PurePosixPath(remote_path).parts or remote_path.startswith("/"):
+        raise RuntimeError("Telegram returned an invalid file path.")
+    url = "https://api.telegram.org/file/bot" + settings["bot_token"] + "/" + remote_path
+    fd, temporary = tempfile.mkstemp(prefix=".telegram-restore-", dir=str(BACKUPS))
+    total = 0
+    try:
+        with os.fdopen(fd, "wb") as output, urllib.request.urlopen(url, timeout=120) as response:
+            while True:
+                chunk = response.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > 1073741824:
+                    raise RuntimeError("Telegram backup exceeds the 1 GiB safety limit.")
+                output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+        if total < 1 or not tarfile.is_tarfile(temporary):
+            raise RuntimeError("Downloaded Telegram document is not a valid tar archive.")
+        os.chmod(temporary, 0o600)
+        target = BACKUPS / filename
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    print("Telegram backup downloaded: " + target.name)
+    return target
+
+def restore_from_telegram():
+    require_root()
+    ensure_dirs()
+    print("Send a Kudex backup document to your configured bot in a private chat first.")
+    incoming = telegram_incoming_backups()
+    if not incoming:
+        print("No matching incoming backups found. Send a backup to the bot and try again.")
+        return
+    for index, item in enumerate(incoming, 1):
+        stamp = datetime.datetime.fromtimestamp(item["date"]).strftime("%Y-%m-%d %H:%M:%S")
+        print("[" + str(index) + "] " + item["name"] + " | " + human_bytes(item["size"]) + " | " + stamp)
+    raw = ask("Telegram backup number")
+    if not raw.isdigit() or not 1 <= int(raw) <= len(incoming):
+        print("Invalid selection.")
+        return
+    selected = incoming[int(raw) - 1]
+    if not confirm("Download " + selected["name"] + " and open the normal Kudex restore workflow?"):
+        return
+    download_telegram_backup(selected["file_id"], selected["name"])
+    restore_backup()
+
 def telegram_backup_menu():
     while True:
         print("\n--- TELEGRAM BACKUP ---")
@@ -1142,6 +1216,7 @@ def telegram_backup_menu():
         print("[2] Test connection (sends a test message)")
         print("[3] Upload latest local backup")
         print("[4] Remove Telegram configuration")
+        print("[5] Restore a backup sent to this bot")
         print("[0] Back")
         choice = input("Select: ").strip()
         if choice == "0":
@@ -1160,6 +1235,8 @@ def telegram_backup_menu():
             if TELEGRAM_CONFIG.exists() and confirm("Remove the saved Telegram bot token and chat ID?"):
                 TELEGRAM_CONFIG.unlink()
                 print("Telegram configuration removed.")
+        elif choice == "5":
+            restore_from_telegram()
         else:
             print("Invalid selection.")
 
