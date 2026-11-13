@@ -29,6 +29,11 @@ class KudexValidationTests(unittest.TestCase):
         with mock.patch.object(kudex.subprocess, "run", return_value=completed):
             self.assertEqual(kudex.openvpn_units(), ["openvpn-server@kudex.service"])
 
+    def test_openvpn_unit_discovery_recognizes_server_template(self):
+        completed = mock.Mock(stdout="openvpn-server@.service enabled\n")
+        with mock.patch.object(kudex.subprocess, "run", return_value=completed):
+            self.assertEqual(kudex.openvpn_units(), ["openvpn-server@kudex.service"])
+
     def test_squid_proxy_config_requires_authentication_and_denies_others(self):
         config = kudex.squid_proxy_config()
         self.assertIn("http_port 0.0.0.0:8880", config)
