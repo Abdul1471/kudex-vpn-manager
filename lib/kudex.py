@@ -1021,7 +1021,9 @@ def service_summary():
         states = [service_state(u) for u in units]
         result[label] = "RUNNING" if "active" in states else ("NOT INSTALLED" if all(x == "unknown" for x in states) else "STOPPED")
     st = state()
-    openvpn = openvpn_units() if "openvpn_units" in globals() else []\n    result["OPENVPN"] = "RUNNING" if any(service_state(u) == "active" for u in openvpn) else ("STOPPED" if openvpn else "NOT INSTALLED")\n    result["SSH-WS"] = "DISABLED" if not st.get("protocols", {}).get("sshws", True) else (
+    openvpn = openvpn_units() if "openvpn_units" in globals() else []
+    result["OPENVPN"] = "RUNNING" if any(service_state(u) == "active" for u in openvpn) else ("STOPPED" if openvpn else "NOT INSTALLED")
+    result["SSH-WS"] = "DISABLED" if not st.get("protocols", {}).get("sshws", True) else (
         "RUNNING" if result["XRAY"] == "RUNNING" and st.get("tls") else "WAITING FOR TLS")
     return result
 
@@ -1064,7 +1066,7 @@ def dashboard():
     print(" [11] Apply Configuration[12] Restore Backup")
     print(" [13] Update Kudex       [14] Upgrade OS Packages")
     print(" [15] Bandwidth Monitor  [16] Restart Services")
-    print(" [17] Ports & Server Info")
+    print(" [17] Ports & Server Info  [18] Stunnel4 & OpenVPN")
     print(" [00] Exit")
     print(cyan+"─"*64+reset)
 
@@ -1163,6 +1165,7 @@ def main():
             elif choice == "15": bandwidth_menu()
             elif choice == "16": restart_services()
             elif choice == "17": ports_info()
+            elif choice == "18": optional_services_menu()
             elif choice == "18": optional_services_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
