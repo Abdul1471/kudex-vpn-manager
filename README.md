@@ -240,3 +240,8 @@ SSH Account Manager → **[8] Clean expired** lists only Kudex-managed SSH users
 - **SSH brute-force protection** is available in menu [30] through Fail2ban. The default policy bans a source IP after three failed SSH attempts in ten minutes for one hour and allowlists the current SSH peer where detectable. This is not a per-account three-strike lock and is not a general DDoS mitigation system.
 
 OHP custom-header transport, cloud licensing, per-account failed-login lockout, and safe active-session termination are not advertised as implemented. OHP requires a verified compatible client/server implementation; licensing requires your real issuer API and policy; per-account lockout requires a validated PAM/auth-log integration. Kudex will not simulate those features or embed licensing secrets.
+
+
+## Active SSH session management
+
+Menu **[31] Active Session Manager** lists sessions reported by systemd-logind and can terminate a selected verified remote login. Kudex protects root sessions, the current loginctl session, and the terminal currently running Kudex. If the current terminal cannot be identified, session termination is disabled. The manager re-reads the target session immediately before termination. Systems without systemd-logind session data are not supported by this feature; Kudex does not fall back to broad process-kill commands.
