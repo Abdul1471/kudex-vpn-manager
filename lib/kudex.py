@@ -1323,14 +1323,14 @@ def squid_proxy_add_user():
     if not valid_name(username):
         raise RuntimeError("Username must be 3–32 characters and start with a letter.")
     password = getpass.getpass("Proxy password (minimum 12 characters): ")
-    if len(password) < 12 or "\\n" in password or "\\r" in password:
+    if len(password) < 12 or "\n" in password or "\r" in password:
         raise RuntimeError("Use a password of at least 12 characters without line breaks.")
     helper = shutil.which("htpasswd")
     cmd = [helper, "-B", "-i"]
     if not SQUID_PASSWORDS.exists() or SQUID_PASSWORDS.stat().st_size == 0:
         cmd.append("-c")
     cmd += [str(SQUID_PASSWORDS), username]
-    proc = subprocess.run(cmd, input=password + "\\n", text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    proc = subprocess.run(cmd, input=password + "\n", text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if proc.returncode:
         raise RuntimeError("Could not create the proxy account: " + proc.stdout[-1500:])
     os.chmod(SQUID_PASSWORDS, 0o640)
@@ -1342,7 +1342,7 @@ def squid_proxy_list_users():
         print("No proxy users configured.")
         return
     users = [line.split(":", 1)[0] for line in SQUID_PASSWORDS.read_text().splitlines() if ":" in line]
-    print("\\nProxy users:")
+    print("\nProxy users:")
     for username in users:
         print(" - " + username)
     if not users:
@@ -1350,7 +1350,7 @@ def squid_proxy_list_users():
 
 def squid_proxy_menu():
     while True:
-        print("\\n--- AUTHENTICATED HTTP PROXY ---")
+        print("\n--- AUTHENTICATED HTTP PROXY ---")
         print(f"Squid service: {service_state('squid.service')} | Port: TCP/{SQUID_PORT}")
         print("[1] Install/configure authenticated proxy")
         print("[2] Add or reset proxy user")
