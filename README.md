@@ -58,7 +58,7 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
 1. Keep your existing SSH session open.
 2. Allow provider firewall TCP ports 80 and 443; allow 2222 only if Dropbear is needed.
 3. Choose [10] Install/Update Xray. The app downloads pinned official Xray-core v26.10.31 and verifies the archive against its accompanying SHA-256 digest.
-4. Choose [07] DOMAIN & SSL. Use the manager to add/change a DNS name pointing to this server, issue a certificate, force-renew the current certificate, or inspect Certbot certificate details. Enter a valid email when configuring the domain. Certbot uses HTTP-01; public TCP/80 must be reachable.
+4. During installation, Kudex asks for your domain after the optional Xray installation. Enter a DNS name whose A/AAAA record already points to this server; leave it blank to skip and configure it later from [07] DOMAIN & SSL. If you enter a domain, Kudex offers to request a Let's Encrypt certificate without an email address. Certbot uses HTTP-01; public TCP/80 and 443 must be reachable. Kudex enables TLS only after verifying that the certificate and private-key files exist.
 5. Choose [11] APPLY CONFIG to validate and start Xray. Nginx config is tested before reload.
 6. Add VMess, VLESS or Trojan accounts using menus [02], [03], [04]. Share URIs are shown only after TLS is ready.
 7. For SSH over WebSocket, create a normal SSH account in menu [01], then enable SSH-WS in menu [05]. WebSocket path /ssh forwards to OpenSSH; SSH authentication remains enabled.
