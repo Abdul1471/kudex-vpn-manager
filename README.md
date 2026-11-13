@@ -82,7 +82,7 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
     [15] BANDWIDTH MONITOR (live; daily/monthly via optional vnStat)
     [16] RESTART MANAGED SERVICES (SSH deliberately excluded)
     [17] PORTS & SERVER INFO
-    [18] STUNNEL4 & OPENVPN
+    [18] STUNNEL4 & OPENVPN\n    [19] SSH SECURITY MANAGER
     [00] EXIT SYSTEM
 
 ## Terminal dashboard and monitoring
@@ -138,3 +138,7 @@ Nginx terminates TLS on TCP/443 and proxies WebSocket paths to Xray. Xray inboun
 
 ## License
 MIT. See LICENSE.
+
+## SSH concurrent-login security
+
+Menu **[19] SSH Security Manager** sets a per-user hard `maxlogins` limit using `/etc/security/limits.d/99-kudex-vpn.conf`. Choose a limit from 1 to 100, list configured rules, or remove a rule. The SSH account submenu also links to this manager. Kudex checks whether `pam_limits.so` appears in the common SSH PAM session files and warns if it cannot detect it. It does not rewrite PAM or OpenSSH configuration automatically; actual enforcement depends on the server's PAM session configuration. Keep an existing administrator session open while testing any access-control change. Root is protected from per-user changes.
