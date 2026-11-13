@@ -39,7 +39,8 @@ fi
 if ! grep -Eq '"authenticated"[[:space:]]*:[[:space:]]*true' "$AUTH_RESPONSE"; then
   printf '\n'
   info "This VPS IP is not currently licensed."
-  info "Register its IP using the /trialip endpoint, or ask the administrator to assign a 30-day or Lifetime license."
+  info "For a free 24-hour trial, run this on the VPS: curl -X POST $LICENSE_API/trialip"
+  info "Alternatively, ask the administrator to assign a 30-day or Lifetime license to this VPS IP."
   info "License API response:"
   cat "$AUTH_RESPONSE"
   die "VPS authentication failed. No VPN services have been installed or configured."
