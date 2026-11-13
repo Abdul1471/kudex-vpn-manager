@@ -49,6 +49,10 @@ class KudexValidationTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 kudex.set_ssh_login_limit("alice", 101)
 
+    def test_dnstt_zone_validation(self):
+        self.assertTrue(kudex.valid_domain("t.example.com"))
+        self.assertFalse(kudex.valid_domain("bad..example.com"))
+
     def test_valid_domains(self):
         self.assertTrue(kudex.valid_domain("vpn.example.com"))
         self.assertFalse(kudex.valid_domain("localhost"))
