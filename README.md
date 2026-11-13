@@ -94,6 +94,10 @@ SSH, VMess, VLESS and Trojan account creation now asks for a validity period in 
 
 Use each protocol menu's **Renew account** option or SSH menu's **Renew account** option to extend validity and re-enable an account. An expired account cannot be manually unlocked without renewal. Existing accounts created before this feature have no recorded expiry and remain unchanged. Expiry is enforced by Kudex while its menu is running; SSH account expiry is additionally enforced by the operating system. A dedicated background expiry timer is not yet installed.
 
+## Backup scheduling
+
+The Backup Manager supports manual backups and automatic systemd-timer schedules every 12 or 24 hours. Backups include the protected `/etc/kudex` data, Xray configuration and Kudex Nginx site when present. Automatic jobs run as root and store archives under `/var/backups/kudex`. Choose **Disable automatic backups** to stop the timer. The current local backup scheduler does not upload archives to Telegram or Google Drive; remote backup integrations are a separate future feature. Treat every archive as sensitive because it contains account credentials.
+
 ## Network layout
 
 Xray listens on loopback only:
