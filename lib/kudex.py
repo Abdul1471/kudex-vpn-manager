@@ -510,7 +510,9 @@ def main():
         print("\n" + "=" * 46 + "\n           KUDEX VPN MANAGER\n" + "=" * 46)
         for label, unit in (("SSH", "ssh.service"), ("NGINX", "nginx.service"), ("XRAY", "xray.service"), ("DROPBEAR", "dropbear.service")):
             print(f"{label:<12}: {service_state(unit).upper()}")
-        print(f"{'SSH-WS':<12}: {'READY' if st.get('protocols',{}).get('sshws') and xray_binary() else 'NOT CONFIGURED'}")
+        ws_enabled = st.get("protocols", {}).get("sshws", True)
+        ws_status = "OFF" if not ws_enabled else ("ON" if service_state("xray.service") == "active" and st.get("tls") else "WAITING FOR TLS")
+        print(f"{'SSH-WS':<12}: {ws_status}")
         print("\n[01] SSH [Menu]\n[02] VMESS [Menu]\n[03] VLESS [Menu]\n[04] TROJAN [Menu]\n[05] SSH-WEBSOCKET [Menu]")
         print("[06] BACKUP  [07] DOMAIN & SSL  [08] CHECK RUNNING  [12] RESTORE BACKUP")
         print("[09] SERVICE CONTROL  [10] INSTALL/UPDATE XRAY  [11] APPLY CONFIG")
