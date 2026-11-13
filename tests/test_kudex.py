@@ -9,6 +9,14 @@ kudex = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(kudex)
 
 class KudexValidationTests(unittest.TestCase):
+    def test_squid_proxy_config_requires_authentication_and_denies_others(self):
+        config = kudex.squid_proxy_config()
+        self.assertIn("http_port 0.0.0.0:8880", config)
+        self.assertIn("acl kudex_authenticated proxy_auth REQUIRED", config)
+        self.assertIn("http_access allow kudex_authenticated", config)
+        self.assertIn("http_access deny all", config)
+        self.assertIn("cache deny all", config)
+
     def test_valid_user_labels(self):
         self.assertTrue(kudex.valid_name("vpn_user-01"))
         self.assertFalse(kudex.valid_name("ab"))
