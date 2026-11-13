@@ -63,13 +63,14 @@ if [[ -t 0 ]]; then
   python3 "$INSTALL_DIR/lib/kudex.py" --install-xray --yes
   python3 "$INSTALL_DIR/lib/kudex.py" --apply-config
  fi
- read -r -p "Enter your domain (DNS must point to this VPS; leave blank to skip): " domain
+ read -r -p "Enter your main domain (e.g. example.com; DNS must point to this VPS; leave blank to skip): " domain
  if [[ -n "$domain" ]]; then
-  if ! python3 "$INSTALL_DIR/lib/kudex.py" --configure-domain "$domain"; then
+  read -r -p "Enter your subdomain (e.g. vpn; leave blank to use the main domain): " subdomain
+  if ! python3 "$INSTALL_DIR/lib/kudex.py" --configure-domain "$domain" "$subdomain"; then
    info "Domain setup did not finish. You can retry later from sudo kudex → [07] DOMAIN & SSL."
   fi
  else
-  info "Domain setup skipped. You can configure it later from sudo kudex → [07] DOMAIN & SSL."
+  info "Domain and subdomain setup skipped. You can configure them later from sudo kudex → [07] DOMAIN & SSL."
  fi
 fi
 info "Installation complete. Open provider firewall TCP/2222 if Dropbear is required."
