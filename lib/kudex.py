@@ -1166,7 +1166,6 @@ def main():
             elif choice == "16": restart_services()
             elif choice == "17": ports_info()
             elif choice == "18": optional_services_menu()
-            elif choice == "18": optional_services_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
