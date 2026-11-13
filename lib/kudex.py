@@ -309,6 +309,81 @@ def configure_domain():
     os.chmod(hook, 0o755)
     print("TLS certificate issued. Certbot renewal timer will reload Nginx after renewal.")
 
+
+SSH_ACCOUNTS = ETC / "ssh-accounts.json"
+
+def expiry_from_days(days):
+    if days <= 0:
+        return None
+    return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=days)).isoformat()
+
+def expiry_status(value):
+    if not value:
+        return "NO EXPIRY"
+    try:
+        expiry = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=datetime.timezone.utc)
+        remaining = (expiry - datetime.datetime.now(datetime.timezone.utc)).total_seconds()
+        if remaining <= 0:
+            return "EXPIRED"
+        return f"{max(1, int((remaining + 86399) // 86400))} day(s) left"
+    except (ValueError, TypeError):
+        return "INVALID EXPIRY"
+
+def expire_due_accounts():
+    """Disable expired Xray clients and lock Kudex-managed SSH users."""
+    changed = False
+    data = clients()
+    for item in data:
+        if item.get("enabled", True) and item.get("expires_at") and expiry_status(item["expires_at"]) == "EXPIRED":
+            item["enabled"] = False
+            item["expired_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            changed = True
+    if changed:
+        atomic_json(CLIENTS, data)
+        if xray_binary():
+            apply_xray()
+        print("Expired VPN accounts were disabled automatically.")
+    ssh_data = read_json(SSH_ACCOUNTS, {})
+    ssh_changed = False
+    for username, details in ssh_data.items():
+        if details.get("expires_at") and expiry_status(details["expires_at"]) == "EXPIRED" and not details.get("locked"):
+            if subprocess.run(["id", username], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+                subprocess.run(["usermod", "--lock", username], check=False)
+            details["locked"] = True
+            details["expired_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            ssh_changed = True
+    if ssh_changed:
+        atomic_json(SSH_ACCOUNTS, ssh_data)
+
+def ask_duration():
+    while True:
+        raw = ask("Validity in days (1 = trial, 0 = unlimited)", "30")
+        if raw.isdigit() and int(raw) <= 36500:
+            return int(raw)
+        print("Enter 0 for unlimited or a number from 1 to 36500.")
+
+def renew_client(proto):
+    name = ask("Account label to renew")
+    data = clients()
+    item = next((c for c in data if c.get("protocol") == proto and c.get("name") == name), None)
+    if not item:
+        print("Account not found.")
+        return
+    days = ask_duration()
+    item["expires_at"] = expiry_from_days(days)
+    item["enabled"] = True
+    item.pop("expired_at", None)
+    atomic_json(CLIENTS, data)
+    try:
+        apply_xray()
+    except Exception:
+        item["enabled"] = False
+        atomic_json(CLIENTS, data)
+        raise
+    print(f"{name} renewed: {'unlimited' if days == 0 else str(days) + ' day(s)'}.")
+
 def protocol_menu(proto):
     if proto == "sshws":
         st = state()
@@ -326,48 +401,73 @@ def protocol_menu(proto):
             if st.get("domain") and st.get("tls"): apply_nginx()
         return
     while True:
+        rows = [c for c in clients() if c.get("protocol") == proto]
         print(f"\n--- {PROTO_NAMES[proto]} ---")
-        rows = [c for c in clients() if c["protocol"] == proto]
-        for c in rows:
-            print(f" {c['name']:<20} {'enabled' if c.get('enabled', True) else 'disabled'}")
-        print("[1] Create account  [2] Delete account  [3] Enable/disable account  [4] Show share links  [0] Back")
+        for item in rows:
+            status = "enabled" if item.get("enabled", True) else "disabled"
+            print(f" {item['name']:<20} {status:<9} {expiry_status(item.get('expires_at'))}")
+        print("[1] Create timed/trial account  [2] Delete  [3] Enable/disable")
+        print("[4] Show share links  [5] Renew account  [0] Back")
         choice = input("Select: ").strip()
-        if choice == "0": return
+        if choice == "0":
+            return
         if choice == "1":
             name = ask("Account label")
             if not valid_name(name):
-                print("Use 3-32 letters/numbers/._-; begin with a letter."); continue
-            if any(c["name"] == name and c["protocol"] == proto for c in clients()):
-                print("That label already exists for this protocol."); continue
+                print("Use 3-32 letters/numbers/._-; begin with a letter.")
+                continue
+            if any(c.get("name") == name and c.get("protocol") == proto for c in clients()):
+                print("That label already exists for this protocol.")
+                continue
+            days = ask_duration()
             secret = uuid4() if proto in ("vmess", "vless") else random_secret(36)
             data = clients()
-            data.append({"name": name, "protocol": proto, "secret": secret, "enabled": True,
-                         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()})
+            item = {"name": name, "protocol": proto, "secret": secret, "enabled": True,
+                    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "expires_at": expiry_from_days(days)}
+            data.append(item)
             atomic_json(CLIENTS, data)
             try:
                 apply_xray()
             except Exception:
                 atomic_json(CLIENTS, [c for c in data if not (c["name"] == name and c["protocol"] == proto)])
                 raise
-            print("Account created. Share link:")
-            print(share_link(data[-1]))
+            print(f"Account created ({'unlimited' if days == 0 else str(days) + ' day(s)'}). Share link:")
+            print(share_link(item))
         elif choice == "2":
             name = ask("Account label to delete")
             data = clients()
-            new = [c for c in data if not (c["protocol"] == proto and c["name"] == name)]
-            if len(new) == len(data): print("Account not found."); continue
-            if not confirm(f"Delete {name} permanently?"): continue
-            atomic_json(CLIENTS, new); apply_xray(); print("Account deleted.")
+            new = [c for c in data if not (c.get("protocol") == proto and c.get("name") == name)]
+            if len(new) == len(data):
+                print("Account not found.")
+                continue
+            if not confirm(f"Delete {name} permanently?"):
+                continue
+            atomic_json(CLIENTS, new)
+            apply_xray()
+            print("Account deleted.")
         elif choice == "3":
             name = ask("Account label")
-            data = clients(); found = next((c for c in data if c["protocol"] == proto and c["name"] == name), None)
-            if not found: print("Account not found."); continue
+            data = clients()
+            found = next((c for c in data if c.get("protocol") == proto and c.get("name") == name), None)
+            if not found:
+                print("Account not found.")
+                continue
+            if found.get("expires_at") and expiry_status(found["expires_at"]) == "EXPIRED":
+                print("This account has expired. Use Renew account first.")
+                continue
             found["enabled"] = not found.get("enabled", True)
-            atomic_json(CLIENTS, data); apply_xray()
+            atomic_json(CLIENTS, data)
+            apply_xray()
             print(f"Account {'enabled' if found['enabled'] else 'disabled'}.")
         elif choice == "4":
-            for c in rows: print(f"\n{c['name']}\n{share_link(c)}")
-        else: print("Invalid selection.")
+            for item in rows:
+                if item.get("enabled", True):
+                    print(f"\n{item['name']} ({expiry_status(item.get('expires_at'))})\n{share_link(item)}")
+        elif choice == "5":
+            renew_client(proto)
+        else:
+            print("Invalid selection.")
 
 def share_link(client):
     st = state(); host = st.get("domain") or "YOUR_DOMAIN"
@@ -388,31 +488,90 @@ def share_link(client):
 
 def ssh_menu():
     while True:
-        print("\n--- SSH ACCOUNTS ---\n[1] Create user  [2] List users  [3] Lock user  [4] Unlock user  [5] Delete user  [0] Back")
+        print("\n--- SSH ACCOUNTS ---")
+        print("[1] Create timed/trial user  [2] List users  [3] Lock user")
+        print("[4] Unlock user  [5] Delete user  [6] Renew account  [0] Back")
         c = input("Select: ").strip()
-        if c == "0": return
+        if c == "0":
+            return
         if c == "1":
             name = ask("Username")
-            if not valid_name(name): print("Invalid username."); continue
-            if name in ("root", "daemon", "nobody") or name.isdigit(): print("Reserved username."); continue
+            if not valid_name(name):
+                print("Invalid username.")
+                continue
+            if name in ("root", "daemon", "nobody") or name.isdigit():
+                print("Reserved username.")
+                continue
             if subprocess.run(["id", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-                print("User already exists."); continue
+                print("User already exists.")
+                continue
             password = getpass.getpass("Temporary password (min 14 chars): ")
-            if len(password) < 14: print("Password too short."); continue
+            if len(password) < 14:
+                print("Password too short.")
+                continue
+            days = ask_duration()
             run(["useradd", "--create-home", "--shell", "/bin/bash", name])
-            run(["chpasswd"], input_text=f"{name}:{password}\n")
-            print(f"Created {name}; require the user to change this temporary password.")
+            try:
+                run(["chpasswd"], input_text=f"{name}:{password}\n")
+                expiry = expiry_from_days(days)
+                if expiry:
+                    expiry_date = datetime.datetime.fromisoformat(expiry).date().isoformat()
+                    run(["chage", "-E", expiry_date, name])
+                else:
+                    run(["chage", "-E", "-1", name])
+                data = read_json(SSH_ACCOUNTS, {})
+                data[name] = {"created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                              "expires_at": expiry, "locked": False}
+                atomic_json(SSH_ACCOUNTS, data)
+            except Exception:
+                subprocess.run(["userdel", "--remove", name], check=False)
+                raise
+            print(f"Created {name}; validity: {'unlimited' if days == 0 else str(days) + ' day(s)'}.")
+            print("Require the user to change this temporary password.")
         elif c == "2":
-            run(["bash", "-lc", "getent passwd | awk -F: '$7 ~ /(bash|sh|zsh)$/ {printf \"%-24s %s\\n\",$1,$6}'"])
-        elif c in ("3", "4", "5"):
+            managed = read_json(SSH_ACCOUNTS, {})
+            for username, details in sorted(managed.items()):
+                print(f"{username:<24} {expiry_status(details.get('expires_at'))} "
+                      f"{'LOCKED' if details.get('locked') else 'ACTIVE'}")
+            if not managed:
+                print("No Kudex-managed SSH accounts recorded yet.")
+        elif c in ("3", "4", "5", "6"):
             name = ask("Username")
             if name == "root" or subprocess.run(["id", name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode:
-                print("User not found or protected."); continue
-            if c == "3": run(["passwd", "-l", name])
-            elif c == "4": run(["passwd", "-u", name])
-            elif confirm(f"Delete {name} and its home directory?"):
-                run(["userdel", "--remove", name])
-        else: print("Invalid selection.")
+                print("User not found or protected.")
+                continue
+            managed = read_json(SSH_ACCOUNTS, {})
+            if c == "3":
+                run(["usermod", "--lock", name])
+                if name in managed:
+                    managed[name]["locked"] = True
+                    atomic_json(SSH_ACCOUNTS, managed)
+            elif c == "4":
+                details = managed.get(name, {})
+                if details.get("expires_at") and expiry_status(details["expires_at"]) == "EXPIRED":
+                    print("This account has expired. Renew it first.")
+                    continue
+                run(["usermod", "--unlock", name])
+                if name in managed:
+                    managed[name]["locked"] = False
+                    atomic_json(SSH_ACCOUNTS, managed)
+            elif c == "5":
+                if confirm(f"Delete {name} and its home directory?"):
+                    run(["userdel", "--remove", name])
+                    managed.pop(name, None)
+                    atomic_json(SSH_ACCOUNTS, managed)
+            elif c == "6":
+                days = ask_duration()
+                expiry = expiry_from_days(days)
+                run(["chage", "-E", datetime.datetime.fromisoformat(expiry).date().isoformat(), name] if expiry
+                    else ["chage", "-E", "-1", name])
+                details = managed.setdefault(name, {})
+                details.update({"expires_at": expiry, "locked": False})
+                atomic_json(SSH_ACCOUNTS, managed)
+                run(["usermod", "--unlock", name])
+                print(f"{name} renewed: {'unlimited' if days == 0 else str(days) + ' day(s)'}.")
+        else:
+            print("Invalid selection.")
 
 def service_menu(label, unit):
     while True:
@@ -741,6 +900,7 @@ def main():
             return
         if sys.argv[1] == "update": update_app(); return
         if sys.argv[1] == "upgrade": upgrade_system(); return
+    expire_due_accounts()
     while True:
         dashboard()
         choice = input("\nSelect menu: ").strip()
