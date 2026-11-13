@@ -72,5 +72,28 @@ class KudexValidationTests(unittest.TestCase):
         self.assertEqual(config["inbounds"][3]["protocol"], "dokodemo-door")
         self.assertEqual(config["inbounds"][3]["settings"]["port"], 22)
 
+    @mock.patch.object(kudex, "read_json", return_value={"keep_last": 12})
+    def test_backup_retention_policy_reads_valid_count(self, _read):
+        self.assertEqual(kudex.backup_retention_count(), 12)
+
+    @mock.patch.object(kudex, "read_json", return_value={"keep_last": 2})
+    def test_backup_retention_policy_rejects_unsafe_count(self, _read):
+        self.assertEqual(kudex.backup_retention_count(), 0)
+
+    def test_backup_pruning_keeps_newest_archives_and_ignores_unmanaged_files(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            names = [f"kudex-202611{day:02d}-120000.tar.gz" for day in range(1, 7)]
+            for name in names:
+                (root / name).write_bytes(b"backup")
+            (root / "notes.txt").write_text("keep")
+            with mock.patch.object(kudex, "BACKUPS", root), mock.patch.object(kudex, "require_root"):
+                removed = kudex.prune_old_backups(5, silent=True)
+            self.assertEqual(removed, 1)
+            self.assertFalse((root / names[0]).exists())
+            self.assertTrue((root / names[-1]).exists())
+            self.assertTrue((root / "notes.txt").exists())
+
 if __name__ == "__main__":
     unittest.main()
