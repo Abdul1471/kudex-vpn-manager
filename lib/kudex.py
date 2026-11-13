@@ -639,6 +639,39 @@ WantedBy=timers.target
     run(["systemctl", "enable", "--now", "kudex-backup.timer"])
     print(f"Automatic Kudex backups enabled every {hours} hours.")
 
+def install_expiry_schedule():
+    require_root()
+    app = pathlib.Path("/opt/kudex-vpn-manager/lib/kudex.py")
+    if not app.exists():
+        raise RuntimeError("Kudex is not installed in /opt/kudex-vpn-manager.")
+    service = pathlib.Path("/etc/systemd/system/kudex-expiry.service")
+    timer = pathlib.Path("/etc/systemd/system/kudex-expiry.timer")
+    service.write_text(f"""[Unit]
+Description=Enforce expired Kudex VPN accounts
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 {app} --expire
+""")
+    timer.write_text("""[Unit]
+Description=Check Kudex account expiry every five minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+Unit=kudex-expiry.service
+
+[Install]
+WantedBy=timers.target
+""")
+    os.chmod(service, 0o644)
+    os.chmod(timer, 0o644)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", "--now", "kudex-expiry.timer"])
+    print("Automatic account expiry enforcement enabled (checks every five minutes).")
+
 def backup_menu():
     while True:
         timer_state = service_state("kudex-backup.timer")
@@ -647,8 +680,11 @@ def backup_menu():
         print("[2] Automatic backup every 12 hours")
         print("[3] Automatic backup every 24 hours")
         print("[4] Disable automatic backups")
+        expiry_timer_state = service_state("kudex-expiry.timer")
         print("[5] List available backups")
-        print(f"Automatic schedule: {timer_state}")
+        print("[6] Enable automatic account expiry checks")
+        print("[7] Disable automatic account expiry checks")
+        print(f"Backup schedule: {timer_state} | Expiry checks: {expiry_timer_state}")
         print("[0] Back")
         choice = input("Select: ").strip()
         if choice == "0":
@@ -669,6 +705,12 @@ def backup_menu():
                 print("No backups found.")
             for item in archives:
                 print(f"{item.name} ({human_bytes(item.stat().st_size)})")
+        elif choice == "6":
+            install_expiry_schedule()
+        elif choice == "7":
+            if confirm("Disable automatic account expiry checks?"):
+                subprocess.run(["systemctl", "disable", "--now", "kudex-expiry.timer"], check=False)
+                print("Automatic account expiry checks disabled.")
         else:
             print("Invalid selection.")
 
@@ -977,6 +1019,7 @@ def main():
         if sys.argv[1] == "update": update_app(); return
         if sys.argv[1] == "upgrade": upgrade_system(); return
         if sys.argv[1] == "--backup-auto": backup(); return
+        if sys.argv[1] == "--expire": expire_due_accounts(); return
     expire_due_accounts()
     while True:
         expire_due_accounts()
