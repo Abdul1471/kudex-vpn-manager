@@ -70,8 +70,8 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
     [03] VLESS [Menu]
     [04] TROJAN [Menu]
     [05] SSH-WEBSOCKET [Menu]
-    [06] BACKUP
-    [07] DOMAIN & SSL
+    [06] BACKUP MANAGER
+    [07] DOMAIN & SSL MANAGER
     [08] CHECK RUNNING
     [09] SERVICE CONTROL
     [10] INSTALL/UPDATE XRAY
