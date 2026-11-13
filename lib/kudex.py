@@ -286,6 +286,8 @@ def configure_domain():
     st.update({"domain": domain, "email": email, "tls": False})
     atomic_json(STATE, st)
     apply_nginx()
+    if xray_binary():
+        apply_xray()
     if not shutil.which("certbot"):
         print("Certbot is not installed. Install it with: apt-get install certbot")
         return
@@ -296,6 +298,8 @@ def configure_domain():
     st["tls"] = True
     atomic_json(STATE, st)
     apply_nginx()
+    if xray_binary():
+        apply_xray()
     hook = pathlib.Path("/etc/letsencrypt/renewal-hooks/deploy/kudex-nginx-reload")
     hook.parent.mkdir(parents=True, exist_ok=True)
     hook.write_text("#!/bin/sh\nsystemctl reload nginx.service\n")
