@@ -25,6 +25,12 @@ class KudexValidationTests(unittest.TestCase):
         self.assertIsNotNone(value)
         self.assertIn("T", value)
 
+    def test_stunnel_config_uses_separate_tls_port_and_local_ssh(self):
+        config = kudex.stunnel_config_text("/etc/stunnel/kudex.pem")
+        self.assertIn("accept = 0.0.0.0:444", config)
+        self.assertIn("connect = 127.0.0.1:22", config)
+        self.assertIn("cert = /etc/stunnel/kudex.pem", config)
+
     def test_valid_domains(self):
         self.assertTrue(kudex.valid_domain("vpn.example.com"))
         self.assertFalse(kudex.valid_domain("localhost"))
