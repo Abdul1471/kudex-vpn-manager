@@ -56,6 +56,13 @@ fi
 if systemctl list-unit-files dropbear.service --no-legend 2>/dev/null | grep -q .; then
  systemctl enable --now dropbear.service || info "Dropbear did not start; inspect systemctl status dropbear."
 fi
+if [[ -t 0 ]]; then
+ read -r -p "Install official Xray-core now? [Y/n]: " answer
+ if [[ -z "$answer" || "$answer" =~ ^[Yy]$ ]]; then
+  python3 "$INSTALL_DIR/lib/kudex.py" --install-xray --yes
+  python3 "$INSTALL_DIR/lib/kudex.py" --apply-config
+ fi
+fi
 info "Installation complete. Open provider firewall TCP/2222 if Dropbear is required."
 info "Keep your current SSH session open. Launch: sudo kudex"
 info "Then choose [10] Install/Update Xray, [07] DOMAIN & SSL, and [11] APPLY CONFIG."
