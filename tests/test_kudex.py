@@ -31,6 +31,23 @@ class KudexValidationTests(unittest.TestCase):
         self.assertIn("connect = 127.0.0.1:22", config)
         self.assertIn("cert = /etc/stunnel/kudex.pem", config)
 
+    def test_ssh_limit_parser_reads_only_valid_maxlogins_rules(self):
+        with mock.patch.object(kudex, "SSH_LIMITS", pathlib.Path("/tmp/kudex-test-limits")):
+            path = pathlib.Path("/tmp/kudex-test-limits")
+            try:
+                path.write_text("# comment\\nalice hard maxlogins 2\\nbob soft maxlogins 3\\nroot hard maxlogins 9\\n")
+                self.assertEqual(kudex.ssh_login_limits(), {"alice": 2})
+            finally:
+                path.unlink(missing_ok=True)
+
+    def test_ssh_limit_rejects_root_and_out_of_range_values(self):
+        with self.assertRaises(RuntimeError):
+            kudex.set_ssh_login_limit("root", 1)
+        with self.assertRaises(RuntimeError):
+            kudex.set_ssh_login_limit("alice", 0)
+        with self.assertRaises(RuntimeError):
+            kudex.set_ssh_login_limit("alice", 101)
+
     def test_valid_domains(self):
         self.assertTrue(kudex.valid_domain("vpn.example.com"))
         self.assertFalse(kudex.valid_domain("localhost"))
