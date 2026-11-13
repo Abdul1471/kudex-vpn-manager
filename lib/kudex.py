@@ -2666,6 +2666,25 @@ def expanded_service_menu():
 BADVPN_CONFIG = ETC / "badvpn.json"
 BADVPN_UNIT = pathlib.Path("/etc/systemd/system/kudex-badvpn.service")
 
+def badvpn_service_text(binary, bind, port):
+    return f"""[Unit]
+Description=Kudex BadVPN UDP Gateway
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+ExecStart={binary} --listen-addr {bind} --listen-port {port} --max-clients 256 --max-connections-for-client 10
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+CapabilityBoundingSet=
+[Install]
+WantedBy=multi-user.target
+"""
+
 def badvpn_configure():
     require_root()
     binary = shutil.which("badvpn-udpgw")
@@ -2687,24 +2706,7 @@ def badvpn_configure():
             try: probe.bind((bind, port))
             except OSError as exc: raise RuntimeError(f"TCP/{port} is already occupied.") from exc
     atomic_json(BADVPN_CONFIG, {"bind": bind, "port": port})
-    unit = f"""[Unit]
-Description=Kudex BadVPN UDP Gateway
-After=network-online.target
-Wants=network-online.target
-[Service]
-Type=simple
-ExecStart={binary} --listen-addr {bind} --listen-port {port} --max-clients 256 --max-connections-for-client 10
-Restart=on-failure
-RestartSec=3
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-CapabilityBoundingSet=
-[Install]
-WantedBy=multi-user.target
-"""
-    BADVPN_UNIT.write_text(unit); os.chmod(BADVPN_UNIT, 0o644)
+    BADVPN_UNIT.write_text(badvpn_service_text(binary, bind, port)); os.chmod(BADVPN_UNIT, 0o644)
     run(["systemctl", "daemon-reload"]); run(["systemctl", "enable", "--now", "kudex-badvpn.service"])
     if service_state("kudex-badvpn.service") != "active": raise RuntimeError("BadVPN did not start; inspect journalctl -u kudex-badvpn.")
     print(f"BadVPN UDPGW active on {bind}:TCP/{port}. Provider firewall changes are manual.")
