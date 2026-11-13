@@ -2996,7 +2996,7 @@ def install_fail2ban_protection():
     path=pathlib.Path("/etc/fail2ban/jail.d/kudex-sshd.local"); path.parent.mkdir(parents=True,exist_ok=True)
     if path.exists():
         stamp=datetime.datetime.now().strftime("%Y%m%d-%H%M%S"); shutil.copy2(path,path.with_name(path.name+".backup-"+stamp))
-    path.write_text("[sshd]\nenabled = true\nbackend = systemd\nport = ssh\nmaxretry = 3\nfindtime = 10m\nbantime = 1h\nignoreip = "+" ".join(ignore)+"\n")
+    path.write_text(fail2ban_jail_config(ignore))
     os.chmod(path,0o644); run(["systemctl","enable","--now","fail2ban.service"]); run(["fail2ban-client","reload"])
     print("Fail2ban SSH jail active: 3 failures / 10 minutes / 1-hour source-IP ban.")
     print("This is brute-force protection, not general DDoS mitigation or account-based three-strike locking.")
