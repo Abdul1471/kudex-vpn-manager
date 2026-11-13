@@ -3201,6 +3201,8 @@ def ddos_guard_install():
         raise RuntimeError("Threshold must be between 50 and 5000.")
     if not minutes.isdigit() or not 1 <= int(minutes) <= 1440:
         raise RuntimeError("Ban duration must be between 1 and 1440 minutes.")
+    if not allowlist:
+        raise RuntimeError("At least one administrator IP/CIDR must be allowlisted before enabling the guard.")
     if not confirm("Enable this limited TCP connection-abuse guard? Private and allowlisted IPs are exempt. This is not upstream DDoS protection."):
         return
     create_nft_guard_table()
