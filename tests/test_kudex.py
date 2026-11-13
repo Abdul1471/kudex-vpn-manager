@@ -41,12 +41,13 @@ class KudexValidationTests(unittest.TestCase):
                 path.unlink(missing_ok=True)
 
     def test_ssh_limit_rejects_root_and_out_of_range_values(self):
-        with self.assertRaises(RuntimeError):
-            kudex.set_ssh_login_limit("root", 1)
-        with self.assertRaises(RuntimeError):
-            kudex.set_ssh_login_limit("alice", 0)
-        with self.assertRaises(RuntimeError):
-            kudex.set_ssh_login_limit("alice", 101)
+        with mock.patch.object(kudex, "require_root"):
+            with self.assertRaises(RuntimeError):
+                kudex.set_ssh_login_limit("root", 1)
+            with self.assertRaises(RuntimeError):
+                kudex.set_ssh_login_limit("alice", 0)
+            with self.assertRaises(RuntimeError):
+                kudex.set_ssh_login_limit("alice", 101)
 
     def test_valid_domains(self):
         self.assertTrue(kudex.valid_domain("vpn.example.com"))
