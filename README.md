@@ -83,6 +83,7 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
     [16] RESTART MANAGED SERVICES (SSH deliberately excluded)
     [17] PORTS & SERVER INFO
     [18] STUNNEL4 & OPENVPN\n    [19] SSH SECURITY MANAGER\n    [20] SLOWDNS / DNSTT\n    [21] SSH BANNER EDITOR\n    [22] AUTO-REBOOT SCHEDULER\n    [23] SERVER SPEED TEST\n    [24] XRAY TRANSPORT MANAGER
+    [25] AUTHENTICATED HTTP PROXY
     [00] EXIT SYSTEM
 
 ## Terminal dashboard and monitoring
