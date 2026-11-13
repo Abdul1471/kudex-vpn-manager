@@ -35,7 +35,7 @@ class KudexValidationTests(unittest.TestCase):
         with mock.patch.object(kudex, "SSH_LIMITS", pathlib.Path("/tmp/kudex-test-limits")):
             path = pathlib.Path("/tmp/kudex-test-limits")
             try:
-                path.write_text("# comment\\nalice hard maxlogins 2\\nbob soft maxlogins 3\\nroot hard maxlogins 9\\n")
+                path.write_text("# comment\nalice hard maxlogins 2\nbob soft maxlogins 3\nroot hard maxlogins 9\n")
                 self.assertEqual(kudex.ssh_login_limits(), {"alice": 2})
             finally:
                 path.unlink(missing_ok=True)
