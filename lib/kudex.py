@@ -1308,6 +1308,7 @@ def squid_proxy_configure():
         shutil.copy2(SQUID_CONFIG, backup_path)
     SQUID_PASSWORDS.touch(mode=0o640, exist_ok=True)
     os.chown(SQUID_PASSWORDS, 0, grp.getgrnam("proxy").gr_gid)
+    os.chmod(SQUID_PASSWORDS, 0o640)
     SQUID_CONFIG.write_text(squid_proxy_config())
     os.chmod(SQUID_CONFIG, 0o640)
     test = subprocess.run(["squid", "-k", "parse"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
