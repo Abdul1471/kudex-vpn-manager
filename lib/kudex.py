@@ -341,9 +341,14 @@ def expire_due_accounts():
             item["expired_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
             changed = True
     if changed:
+        previous = clients()
         atomic_json(CLIENTS, data)
-        if xray_binary():
-            apply_xray()
+        try:
+            if xray_binary():
+                apply_xray()
+        except Exception:
+            atomic_json(CLIENTS, previous)
+            raise
         print("Expired VPN accounts were disabled automatically.")
     ssh_data = read_json(SSH_ACCOUNTS, {})
     ssh_changed = False
@@ -517,7 +522,7 @@ def ssh_menu():
                 run(["chpasswd"], input_text=f"{name}:{password}\n")
                 expiry = expiry_from_days(days)
                 if expiry:
-                    expiry_date = datetime.datetime.fromisoformat(expiry).date().isoformat()
+                    expiry_date = (datetime.datetime.now().date() + datetime.timedelta(days=days)).isoformat()
                     run(["chage", "-E", expiry_date, name])
                 else:
                     run(["chage", "-E", "-1", name])
@@ -565,7 +570,7 @@ def ssh_menu():
             elif c == "6":
                 days = ask_duration()
                 expiry = expiry_from_days(days)
-                run(["chage", "-E", datetime.datetime.fromisoformat(expiry).date().isoformat(), name] if expiry
+                run(["chage", "-E", (datetime.datetime.now().date() + datetime.timedelta(days=days)).isoformat(), name] if expiry
                     else ["chage", "-E", "-1", name])
                 details = managed.setdefault(name, {})
                 details.update({"expires_at": expiry, "locked": False})
