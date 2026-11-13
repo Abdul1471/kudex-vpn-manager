@@ -187,7 +187,8 @@ class KudexValidationTests(unittest.TestCase):
 
     def test_badvpn_unit_is_restricted_and_uses_validated_port(self):
         text = kudex.badvpn_service_text("/usr/bin/badvpn-udpgw", "127.0.0.1", 7300)
-        self.assertIn("--listen-addr 127.0.0.1 --listen-port 7300", text)
+        self.assertIn("--listen-addr 127.0.0.1:7300", text)
+        self.assertNotIn("--listen-port", text)
         self.assertIn("--max-clients 256", text)
         self.assertIn("NoNewPrivileges=true", text)
 
