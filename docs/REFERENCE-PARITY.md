@@ -39,8 +39,8 @@ Already present in Kudex:
 | Telegram cloud backup/restore | Partial | Current implementation uploads and restores documents sent to the configured bot chat; arbitrary share-link restore is not supported |
 | Google Drive backup | Implemented through rclone (opt-in) | Root-managed rclone OAuth remote; automatic upload of new local backups; manual restore/download can be performed with rclone; pending VPS verification |
 | OTA application update | Implemented | Preserve pre-update backup and validate release contents |
-| Automatic expiry | Partial | Existing expiry checks run every five minutes; add configurable expiry policy and optional session termination after safe identity checks |
-| Anti-multilogin / live session termination | Partial | Existing PAM maxlogins + Fail2ban IP bans; live-session termination and per-account strikes remain outstanding |
+| Automatic expiry | Partial | Expired SSH/Xray accounts are disabled during manager checks; verify timer cadence and session revocation on a fresh VPS |
+| Anti-multilogin / live session termination | Partial | Guarded live-session termination is implemented in menu [31]; per-account three-strike lockout remains outstanding |
 | Three-strike account lock | Not implemented | Fail2ban currently bans source IPs; per-account lockout requires validated PAM/auth-log integration |
 | SSH brute-force protection | Implemented (Fail2ban, opt-in) | Three failures / ten minutes / one-hour source-IP ban; current SSH peer allowlisted when detectable; not general DDoS protection |
 | RAM maintenance | Not implemented | Provide diagnostics and safe maintenance; do not market cache dropping as a performance fix |
