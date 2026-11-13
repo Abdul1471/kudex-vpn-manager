@@ -2230,7 +2230,10 @@ def restore_backup():
     try:
         for name, content in staged.items():
             path = targets[name]; path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(content); os.chmod(path, 0o600 if name.startswith(("etc/kudex", "usr/local/etc/xray")) else 0o644)
+            path.write_bytes(content); os.chmod(path, 0o600 if name.startswith(("etc/kudex", "usr/local/etc/xray", "etc/openvpn/server")) else 0o644)
+        if any(name.startswith("etc/openvpn/server/kudex/") for name in staged):
+            (OPENVPN_SERVER_DIR / "kudex").mkdir(mode=0o700, parents=True, exist_ok=True)
+            os.chmod(OPENVPN_SERVER_DIR / "kudex", 0o700)
         if "usr/local/etc/xray/config.json" in staged and xray_binary():
             test = subprocess.run([xray_binary(), "run", "-test", "-config", str(XRAY_CONFIG)], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
             if test.returncode: raise RuntimeError("Restored Xray config failed validation: " + test.stdout[-2000:])
