@@ -17,6 +17,20 @@ class KudexValidationTests(unittest.TestCase):
         self.assertIn("http_access deny all", config)
         self.assertIn("cache deny all", config)
 
+    def test_dante_config_requires_pam_auth_and_does_not_allow_anonymous(self):
+        config = kudex.dante_config("eth0")
+        self.assertIn("internal: 0.0.0.0 port = 1080", config)
+        self.assertIn("external: eth0", config)
+        self.assertIn("socksmethod: pam.username", config)
+        self.assertIn("pam.servicename: sockd", config)
+        self.assertNotIn("socksmethod: none", config)
+
+    def test_dante_pam_restricts_authentication_to_kudex_group(self):
+        policy = kudex.dante_pam_config()
+        self.assertIn("user ingroup kudex-socks", policy)
+        self.assertIn("@include common-auth", policy)
+        self.assertIn("@include common-account", policy)
+
     def test_valid_user_labels(self):
         self.assertTrue(kudex.valid_name("vpn_user-01"))
         self.assertFalse(kudex.valid_name("ab"))
