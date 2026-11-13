@@ -435,6 +435,30 @@ def renew_client(proto):
         raise
     print(f"{name} renewed: {'unlimited' if days == 0 else str(days) + ' day(s)'}.")
 
+def cleanup_expired_protocol_accounts(proto):
+    require_root()
+    data = clients()
+    expired = [item for item in data if item.get("protocol") == proto
+               and item.get("expires_at") and expiry_status(item.get("expires_at")) == "EXPIRED"]
+    if not expired:
+        print("No expired " + PROTO_NAMES[proto] + " accounts to clean.")
+        return 0
+    print("Expired accounts:")
+    for item in expired:
+        print(" - " + item.get("name", "(unnamed)"))
+    if not confirm("Permanently remove these " + str(len(expired)) + " expired " + PROTO_NAMES[proto] + " account(s)?"):
+        return 0
+    expired_ids = {(item.get("name"), item.get("secret")) for item in expired}
+    remaining = [item for item in data if (item.get("name"), item.get("secret")) not in expired_ids]
+    atomic_json(CLIENTS, remaining)
+    try:
+        apply_xray()
+    except Exception:
+        atomic_json(CLIENTS, data)
+        raise
+    print("Removed " + str(len(expired)) + " expired account(s).")
+    return len(expired)
+
 def protocol_menu(proto):
     if proto == "sshws":
         st = state()
@@ -459,7 +483,7 @@ def protocol_menu(proto):
             status = "enabled" if item.get("enabled", True) else "disabled"
             print(f" {item['name']:<20} {status:<9} {expiry_status(item.get('expires_at'))}")
         print("[1] Create timed/trial account  [2] Delete  [3] Enable/disable")
-        print("[4] Show share links  [5] Renew account  [0] Back")
+        print("[4] Show share links  [5] Renew account  [6] Clean expired  [0] Back")
         choice = input("Select: ").strip()
         if choice == "0":
             return
@@ -518,6 +542,8 @@ def protocol_menu(proto):
                     print(f"\n{item['name']} ({expiry_status(item.get('expires_at'))})\n{share_link(item)}")
         elif choice == "5":
             renew_client(proto)
+        elif choice == "6":
+            cleanup_expired_protocol_accounts(proto)
         else:
             print("Invalid selection.")
 
@@ -538,17 +564,54 @@ def share_link(client):
         return f"vless://{secret}@{host}:443?{query}#{urllib.parse.quote(name)}"
     return f"trojan://{secret}@{host}:443?{query}#{urllib.parse.quote(name)}"
 
+def cleanup_expired_ssh_accounts():
+    require_root()
+    managed = read_json(SSH_ACCOUNTS, {})
+    expired = [name for name, details in managed.items()
+               if valid_name(name) and details.get("expires_at")
+               and expiry_status(details.get("expires_at")) == "EXPIRED"]
+    if not expired:
+        print("No expired Kudex SSH accounts to clean.")
+        return 0
+    print("Expired Kudex SSH accounts:")
+    for name in sorted(expired):
+        print(" - " + name)
+    print("Existing login sessions may remain active until they disconnect.")
+    if not confirm("Delete these expired Linux users and their home directories?"):
+        return 0
+    limits = ssh_login_limits()
+    removed = 0
+    for name in expired:
+        exists = subprocess.run(["id", name], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL).returncode == 0
+        if exists:
+            result = run(["userdel", "--remove", name], check=False)
+            if result.returncode != 0:
+                print("Could not remove " + name + "; keeping its Kudex record.")
+                continue
+        managed.pop(name, None)
+        limits.pop(name, None)
+        removed += 1
+    atomic_json(SSH_ACCOUNTS, managed)
+    if removed:
+        write_ssh_login_limits(limits)
+    print("Cleaned " + str(removed) + " expired SSH account(s).")
+    return removed
+
 def ssh_menu():
     while True:
         expire_due_accounts()
         print("\n--- SSH ACCOUNTS ---")
         print("[1] Create timed/trial user  [2] List users  [3] Lock user")
-        print("[4] Unlock user  [5] Delete user  [6] Renew account  [7] SSH security  [0] Back")
+        print("[4] Unlock user  [5] Delete user  [6] Renew account  [7] SSH security  [8] Clean expired  [0] Back")
         c = input("Select: ").strip()
         if c == "0":
             return
         if c == "7":
             ssh_security_menu()
+            continue
+        if c == "8":
+            cleanup_expired_ssh_accounts()
             continue
         if c == "1":
             name = ask("Username")
