@@ -279,3 +279,6 @@ Suggested first-run order:
 8. Keep a record of expected ports and remove services you do not intend to expose.
 
 Do not enable unauthenticated public UDPGW, proxy listeners, or firewall automation without reviewing their warnings and access controls. Licensing and per-account three-strike lockout are not included in this release.
+
+
+For a structured clean-server acceptance run, follow the [Fresh VPS test plan](docs/FRESH-VPS-TEST-PLAN.md).
