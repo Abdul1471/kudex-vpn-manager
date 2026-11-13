@@ -100,7 +100,7 @@ def random_secret(length=28):
 def xray_binary():
     return shutil.which("xray") or ("/usr/local/bin/xray" if pathlib.Path("/usr/local/bin/xray").exists() else None)
 
-def install_xray():
+def install_xray(force=False):
     require_root()
     machine = platform.machine().lower()
     asset = {"x86_64": "Xray-linux-64.zip", "amd64": "Xray-linux-64.zip",
@@ -108,7 +108,7 @@ def install_xray():
              "armv7l": "Xray-linux-arm32-v7a.zip"}.get(machine)
     if not asset:
         raise RuntimeError(f"Unsupported CPU architecture: {machine}")
-    if not confirm(f"Download official Xray-core v{XRAY_VERSION} for {machine} from XTLS/Xray-core?"):
+    if not force and not confirm(f"Download official Xray-core v{XRAY_VERSION} for {machine} from XTLS/Xray-core?"):
         return
     import zipfile
     base = f"https://github.com/XTLS/Xray-core/releases/download/v{XRAY_VERSION}/"
@@ -372,7 +372,9 @@ def share_link(client):
                "aid": "0", "scy": "auto", "net": "ws", "type": "none",
                "host": host, "path": path, "tls": "tls", "sni": host}
         return "vmess://" + base64.b64encode(json.dumps(obj, separators=(",", ":")).encode()).decode().rstrip("=")
-    query = urllib.parse.urlencode({"type": "ws", "security": "tls", "path": path, "host": host, "sni": host})
+    query_values = {"type": "ws", "security": "tls", "path": path, "host": host, "sni": host}
+    if client["protocol"] == "vless": query_values["encryption"] = "none"
+    query = urllib.parse.urlencode(query_values)
     if client["protocol"] == "vless":
         return f"vless://{secret}@{host}:443?{query}#{urllib.parse.quote(name)}"
     return f"trojan://{secret}@{host}:443?{query}#{urllib.parse.quote(name)}"
@@ -491,7 +493,7 @@ def main():
     require_root(); ensure_dirs()
     if len(sys.argv) > 1:
         if sys.argv[1] == "--install-xray":
-            install_xray(); return
+            install_xray(force="--yes" in sys.argv); return
         if sys.argv[1] == "--apply-config":
             apply_xray()
             if state().get("domain"): apply_nginx()
