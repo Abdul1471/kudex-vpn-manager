@@ -244,6 +244,8 @@ def nginx_config(st):
         lines += ["    location / { return 200 'Kudex VPN Manager endpoint'; add_header Content-Type text/plain; }", "}"]
     if ssl:
         for proto, port in PORTS.items():
+            if proto == "sshws" and not st.get("protocols", {}).get("sshws", True):
+                continue
             path = PATHS[proto]
             lines += [f"    location = {path} {{", "        proxy_redirect off;",
                       f"        proxy_pass http://127.0.0.1:{port};",
