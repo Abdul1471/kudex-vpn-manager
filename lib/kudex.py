@@ -526,7 +526,7 @@ def configure_reality():
     server_domain = state().get("domain", "")
     if not valid_domain(server_domain):
         raise RuntimeError("Configure a valid server domain before setting up VLESS REALITY.")
-    target = ask("REALITY target host:port (use a stable HTTPS origin, not a CDN proxy)", "www.example.com:443").strip()
+    target = ask("REALITY target host:port (use a stable HTTPS origin, not a CDN proxy)").strip()
     match = re.fullmatch(r"([A-Za-z0-9.-]+):([0-9]{1,5})", target)
     if not match or not valid_domain(match.group(1)) or not 1 <= int(match.group(2)) <= 65535:
         raise RuntimeError("Enter a valid target such as www.example.com:443.")
@@ -596,6 +596,12 @@ def transport_manager_menu():
             except Exception:
                 if previous:
                     atomic_json(STATE, previous)
+                    try:
+                        apply_xray()
+                        if previous.get("domain") and previous.get("tls"):
+                            apply_nginx()
+                    except Exception:
+                        pass
                 raise
             print(f"{proto.upper()} HTTPUpgrade {'enabled' if choice == '1' else 'disabled'}.")
             if choice == "1":
