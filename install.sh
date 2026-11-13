@@ -29,23 +29,51 @@ apt-get update
 apt-get install -y --no-install-recommends curl ca-certificates
 
 AUTH_RESPONSE="$(mktemp)"
-trap 'rm -f "$AUTH_RESPONSE"' EXIT
+TRIAL_RESPONSE="$(mktemp)"
+trap 'rm -f "$AUTH_RESPONSE" "$TRIAL_RESPONSE"' EXIT
+
+# First accept an existing paid license or previously registered trial.
 if ! curl --silent --show-error --fail --max-time 20 \
   --request POST "$LICENSE_API/api/authenticate" \
   --header "Accept: application/json" \
   --output "$AUTH_RESPONSE"; then
   die "Could not reach KudexTech License API. Installation stopped before domain setup."
 fi
+
+# If no active license exists, automatically request the one-time 24-hour trial.
 if ! grep -Eq '"authenticated"[[:space:]]*:[[:space:]]*true' "$AUTH_RESPONSE"; then
-  printf '\n'
-  info "This VPS IP is not currently licensed."
-  info "For a free 24-hour trial, run this on the VPS: curl -X POST $LICENSE_API/trialip"
-  info "Alternatively, ask the administrator to assign a 30-day or Lifetime license to this VPS IP."
+  info "No active license found. Requesting the automatic 24-hour VPS trial..."
+  if ! curl --silent --show-error --max-time 20 \
+    --request POST "$LICENSE_API/trialip" \
+    --header "Accept: application/json" \
+    --output "$TRIAL_RESPONSE"; then
+    die "Could not reach KudexTech trial registration. Installation stopped safely."
+  fi
+
+  if ! grep -Eq '"registered"[[:space:]]*:[[:space:]]*true' "$TRIAL_RESPONSE"; then
+    info "Automatic trial registration was not approved. The IP may already have used its trial or may have a revoked license."
+    info "Trial API response:"
+    cat "$TRIAL_RESPONSE"
+    info "Ask the KudexTech administrator to review this VPS IP or assign a 30-day/Lifetime license."
+    die "VPS authentication failed. No VPN services have been installed or configured."
+  fi
+
+  info "24-hour trial registered. Verifying VPS authentication..."
+  if ! curl --silent --show-error --fail --max-time 20 \
+    --request POST "$LICENSE_API/api/authenticate" \
+    --header "Accept: application/json" \
+    --output "$AUTH_RESPONSE"; then
+    die "Trial was registered but the authentication service could not be reached for verification. Retry installation."
+  fi
+fi
+
+if ! grep -Eq '"authenticated"[[:space:]]*:[[:space:]]*true' "$AUTH_RESPONSE"; then
   info "License API response:"
   cat "$AUTH_RESPONSE"
   die "VPS authentication failed. No VPN services have been installed or configured."
 fi
-rm -f "$AUTH_RESPONSE"
+
+rm -f "$AUTH_RESPONSE" "$TRIAL_RESPONSE"
 trap - EXIT
 info "VPS IP authenticated successfully."
 
