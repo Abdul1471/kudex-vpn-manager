@@ -496,15 +496,106 @@ def diagnostics():
     print("\n--- PORT LISTENERS ---")
     if shutil.which("ss"): run(["ss", "-lntp"], check=False)
 
+def update_app():
+    """Safely update installed Kudex application files from the public main branch."""
+    require_root()
+    ensure_dirs()
+    import io
+    repo_url = "https://codeload.github.com/Abdul1471/kudex-vpn-manager/tar.gz/refs/heads/main"
+    request = urllib.request.Request(repo_url, headers={"User-Agent": "KudexVPNManager-Updater"})
+    with urllib.request.urlopen(request, timeout=90) as response:
+        archive_data = response.read()
+    wanted = {"lib/kudex.py", "lib/common.sh", "bin/kudex", "install.sh"}
+    staged = {}
+    with tarfile.open(fileobj=io.BytesIO(archive_data), mode="r:gz") as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            parts = pathlib.PurePosixPath(member.name).parts
+            if len(parts) >= 2:
+                relative = "/".join(parts[1:])
+                if relative in wanted:
+                    stream = archive.extractfile(member)
+                    if stream:
+                        staged[relative] = stream.read()
+    missing = wanted - staged.keys()
+    if missing:
+        raise RuntimeError("Update archive is incomplete: " + ", ".join(sorted(missing)))
+    try:
+        compile(staged["lib/kudex.py"].decode("utf-8"), "kudex.py", "exec")
+    except (UnicodeDecodeError, SyntaxError) as exc:
+        raise RuntimeError(f"Downloaded Kudex update failed Python validation: {exc}")
+    install_root = pathlib.Path("/opt/kudex-vpn-manager")
+    targets = {
+        "lib/kudex.py": install_root / "lib/kudex.py",
+        "lib/common.sh": install_root / "lib/common.sh",
+        "bin/kudex": install_root / "bin/kudex",
+        "install.sh": install_root / "install.sh",
+    }
+    for target in targets.values():
+        if not target.exists():
+            raise RuntimeError(f"Installed file missing: {target}. Run the installer once to repair the installation.")
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_path = BACKUPS / f"kudex-app-before-update-{stamp}.tar.gz"
+    with tarfile.open(backup_path, "w:gz") as archive:
+        for relative, target in targets.items():
+            archive.add(target, arcname=relative)
+    os.chmod(backup_path, 0o600)
+    replaced = []
+    try:
+        for relative, target in targets.items():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix=".kudex-update-", dir=str(target.parent))
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(staged[relative])
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.chmod(temporary, 0o755 if relative in ("bin/kudex", "install.sh") else 0o644)
+                os.replace(temporary, target)
+                replaced.append(relative)
+            finally:
+                if os.path.exists(temporary):
+                    os.unlink(temporary)
+    except Exception:
+        with tarfile.open(backup_path, "r:gz") as archive:
+            for relative in replaced:
+                member = archive.getmember(relative)
+                stream = archive.extractfile(member)
+                if stream:
+                    targets[relative].write_bytes(stream.read())
+        raise
+    print("Kudex application updated successfully.")
+    print(f"Pre-update application backup: {backup_path}")
+    print("Your VPN clients, domain, TLS certificates and server configuration were preserved.")
+    print("No VPN services were restarted. Run 'sudo kudex apply' if the release notes require reapplying configuration.")
+
+def upgrade_system():
+    """Upgrade installed Ubuntu/Debian packages without changing Kudex data."""
+    require_root()
+    if not pathlib.Path("/usr/bin/apt-get").exists():
+        raise RuntimeError("System package upgrade is available only on apt-based Ubuntu/Debian systems.")
+    if not confirm("Run apt-get update and apt-get upgrade on this server?"):
+        print("System upgrade cancelled.")
+        return
+    os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+    run(["apt-get", "update"])
+    run(["apt-get", "upgrade", "-y"])
+    print("System package upgrade completed. Review any service restart notices above.")
+
 def main():
     require_root(); ensure_dirs()
     if len(sys.argv) > 1:
         if sys.argv[1] == "--install-xray":
             install_xray(force="--yes" in sys.argv); return
-        if sys.argv[1] == "--apply-config":
+        if sys.argv[1] == "--apply-config" or sys.argv[1] == "apply":
             apply_xray()
             if state().get("domain"): apply_nginx()
             return
+        if sys.argv[1] == "update":
+            update_app(); return
+        if sys.argv[1] == "upgrade":
+            upgrade_system(); return
     while True:
         st = state()
         print("\n" + "=" * 46 + "\n           KUDEX VPN MANAGER\n" + "=" * 46)
@@ -516,6 +607,7 @@ def main():
         print("\n[01] SSH [Menu]\n[02] VMESS [Menu]\n[03] VLESS [Menu]\n[04] TROJAN [Menu]\n[05] SSH-WEBSOCKET [Menu]")
         print("[06] BACKUP  [07] DOMAIN & SSL  [08] CHECK RUNNING  [12] RESTORE BACKUP")
         print("[09] SERVICE CONTROL  [10] INSTALL/UPDATE XRAY  [11] APPLY CONFIG")
+        print("[13] UPDATE KUDEX APPLICATION  [14] UPGRADE UBUNTU/DEBIAN PACKAGES")
         print("[00] EXIT SYSTEM")
         choice = input("\nSelect option: ").strip()
         try:
@@ -536,6 +628,8 @@ def main():
             elif choice == "10": install_xray()
             elif choice == "11": apply_xray(); apply_nginx() if state().get("domain") else None
             elif choice == "12": restore_backup()
+            elif choice == "13": update_app()
+            elif choice == "14": upgrade_system()
             elif choice in ("0", "00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc:
