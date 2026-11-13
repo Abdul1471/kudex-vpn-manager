@@ -162,7 +162,20 @@ WantedBy=multi-user.target
 
 def reality_profile():
     profile = read_json(REALITY_CONFIG, {})
-    return profile if isinstance(profile, dict) else {}
+    if not isinstance(profile, dict):
+        raise RuntimeError("Kudex REALITY settings must be a JSON object.")
+    if profile.get("enabled"):
+        required = ("target", "server_name", "private_key", "public_key", "short_id")
+        if any(not isinstance(profile.get(key), str) or not profile.get(key) for key in required):
+            raise RuntimeError("Kudex REALITY settings are incomplete. Reconfigure VLESS REALITY.")
+        target = re.fullmatch(r"([A-Za-z0-9.-]+):([0-9]{1,5})", profile["target"])
+        if (not target or not valid_domain(target.group(1)) or
+                not 1 <= int(target.group(2)) <= 65535 or
+                not valid_domain(profile["server_name"]) or
+                not re.fullmatch(r"[0-9a-fA-F]{2,16}", profile["short_id"]) or
+                len(profile["short_id"]) % 2):
+            raise RuntimeError("Kudex REALITY settings are invalid. Reconfigure VLESS REALITY.")
+    return profile
 
 def protocol_clients(protocol, entries, reality=False):
     if protocol == "vmess":
