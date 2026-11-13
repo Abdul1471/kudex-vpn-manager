@@ -224,6 +224,25 @@ class KudexValidationTests(unittest.TestCase):
 
 
 
+class KudexDomainCompositionTests(unittest.TestCase):
+    def test_main_domain_without_subdomain_is_preserved(self):
+        self.assertEqual(kudex.compose_domain("Example.COM", ""), "example.com")
+
+    def test_subdomain_is_combined_with_main_domain(self):
+        self.assertEqual(kudex.compose_domain("example.com", "VPN"), "vpn.example.com")
+
+    def test_nested_subdomain_is_supported(self):
+        self.assertEqual(kudex.compose_domain("example.com", "node.eu"), "node.eu.example.com")
+
+    def test_invalid_subdomain_is_rejected(self):
+        with self.assertRaises(RuntimeError):
+            kudex.compose_domain("example.com", "-vpn")
+
+    def test_invalid_main_domain_is_rejected(self):
+        with self.assertRaises(RuntimeError):
+            kudex.compose_domain("example", "vpn")
+
+
 class KudexSessionSafetyTests(unittest.TestCase):
     def test_current_session_is_never_terminable(self):
         row = {"id": "7", "user": "alice", "tty": "pts/2", "remote": True}
