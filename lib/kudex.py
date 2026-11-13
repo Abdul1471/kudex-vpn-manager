@@ -505,7 +505,7 @@ def update_app():
     request = urllib.request.Request(repo_url, headers={"User-Agent": "KudexVPNManager-Updater"})
     with urllib.request.urlopen(request, timeout=90) as response:
         archive_data = response.read()
-    wanted = {"lib/kudex.py", "lib/common.sh", "bin/kudex", "install.sh"}
+    wanted = {"lib/kudex.py", "lib/common.sh", "bin/kudex"}
     staged = {}
     with tarfile.open(fileobj=io.BytesIO(archive_data), mode="r:gz") as archive:
         for member in archive.getmembers():
@@ -530,7 +530,6 @@ def update_app():
         "lib/kudex.py": install_root / "lib/kudex.py",
         "lib/common.sh": install_root / "lib/common.sh",
         "bin/kudex": install_root / "bin/kudex",
-        "install.sh": install_root / "install.sh",
     }
     for target in targets.values():
         if not target.exists():
@@ -551,7 +550,7 @@ def update_app():
                     handle.write(staged[relative])
                     handle.flush()
                     os.fsync(handle.fileno())
-                os.chmod(temporary, 0o755 if relative in ("bin/kudex", "install.sh") else 0o644)
+                os.chmod(temporary, 0o755 if relative == "bin/kudex" else 0o644)
                 os.replace(temporary, target)
                 replaced.append(relative)
             finally:
