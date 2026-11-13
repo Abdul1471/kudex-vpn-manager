@@ -214,8 +214,6 @@ class KudexValidationTests(unittest.TestCase):
         # remain provider-neutral so the token is never copied into Kudex state.
         self.assertIn('["rclone","config","show",remote]', inspect.getsource(kudex.google_drive_menu))
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class KudexSessionSafetyTests(unittest.TestCase):
@@ -242,3 +240,6 @@ class KudexSessionSafetyTests(unittest.TestCase):
     def test_other_verified_remote_session_can_be_terminated(self):
         row = {"id": "8", "user": "alice", "tty": "pts/3", "remote": True}
         self.assertTrue(kudex.session_termination_allowed(row, "7", "pts/2"))
+
+if __name__ == "__main__":
+    unittest.main()
