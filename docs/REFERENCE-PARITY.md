@@ -95,9 +95,18 @@ Already present in Kudex:
 - [x] OpenVPN server provisioning using Easy-RSA, certificate authentication, tls-crypt, and individual client profiles. No automatic NAT, firewall or default-route changes.
 - [x] Google Drive backup uploads through rclone OAuth remotes; credentials remain outside the repository.
 - [x] Fail2ban SSH brute-force jail (3 failures / 10 minutes / 1-hour ban), with the active SSH peer allowlisted when detectable.
-- [ ] OHP, premium license API, per-account three-strike lock, safe active-session termination, and general DDoS mitigation remain outstanding. These require verified upstream compatibility, owner-provided licensing infrastructure, and safe authentication/firewall integration.
+- [ ] OHP transport remains outstanding: the public Open HTTP Puncher artifacts located so far are legacy Linux 32-bit binaries without a verified modern amd64 build/source release, so Kudex will not install an unverified binary on supported 64-bit VPS hosts.
+- [ ] Premium license API remains deferred by user request.
+- [ ] Per-account three-strike lockout remains outstanding pending a safe PAM/authentication integration.
+- [ ] General DDoS mitigation remains outside scope; the new TCP connection-abuse guard is not volumetric or upstream DDoS protection.
 
 
 ## Active session management update
 
 Kudex now includes a guarded session manager using systemd-logind. It can terminate a selected remote login only after re-checking the session, and it refuses root sessions, the current session, the current terminal, and any request when the active Kudex terminal cannot be identified. This does not implement automatic per-account three-strike lockout or general DDoS mitigation.
+
+
+## Connection guard and session manager status
+
+- [x] Guarded active remote-session termination via systemd-logind; root and the current session/terminal are protected, and termination is disabled when the current terminal cannot be identified.
+- [x] Limited nftables TCP connection-abuse guard with a separate Kudex table, expiring address sets, private-network exemptions, and mandatory administrator allowlisting. It scans established TCP connections once per minute and must not be described as general DDoS protection.
