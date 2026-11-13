@@ -89,6 +89,7 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
     [28] OPENVPN PROVISIONING
     [29] GOOGLE DRIVE BACKUP
     [30] SSH / HOST PROTECTION
+    [31] ACTIVE SESSION MANAGER
     [00] EXIT SYSTEM
 
 ## Terminal dashboard and monitoring
