@@ -142,3 +142,10 @@ MIT. See LICENSE.
 ## SSH concurrent-login security
 
 Menu **[19] SSH Security Manager** sets a per-user hard `maxlogins` limit using `/etc/security/limits.d/99-kudex-vpn.conf`. Choose a limit from 1 to 100, list configured rules, or remove a rule. The SSH account submenu also links to this manager. Kudex checks whether `pam_limits.so` appears in the common SSH PAM session files and warns if it cannot detect it. It does not rewrite PAM or OpenSSH configuration automatically; actual enforcement depends on the server's PAM session configuration. Keep an existing administrator session open while testing any access-control change. Root is protected from per-user changes.
+
+
+## SlowDNS / DNSTT manager
+
+Menu [20] SLOWDNS / DNSTT builds the upstream dnstt-server from its Go source, generates a persistent server keypair, displays the public key, and can create a systemd service listening on UDP/53 and forwarding tunnel streams to a chosen local TCP service (default 127.0.0.1:22). The service runs as a dedicated unprivileged dnstt account with only CAP_NET_BIND_SERVICE; the private key is readable only by that account and root.
+
+A working DNS tunnel also requires a delegated DNS zone: create an A/AAAA record for the authoritative nameserver host pointing to this VPS, then delegate the tunnel subdomain with an NS record to that host. Allow inbound UDP/53 in provider and host firewalls. Kudex does not modify DNS records, firewall rules, or NAT. It refuses to start if UDP/53 is already occupied. Rotating the keypair invalidates the previous client public key; redistribute the new public key to authorized clients. Never share server.key.
