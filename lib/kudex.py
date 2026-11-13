@@ -1288,7 +1288,8 @@ def backup_retention_menu():
             return
         atomic_json(BACKUP_POLICY, {"keep_last": int(raw)})
         print(f"Smart retention enabled: keep the latest {raw} local backups.")
-        prune_old_backups(int(raw), silent=False)
+        if confirm("Run cleanup now and permanently remove older local archives beyond this limit?"):
+            prune_old_backups(int(raw), silent=False)
     elif choice == "2":
         if BACKUP_POLICY.exists() and confirm("Disable automatic local backup rotation?"):
             BACKUP_POLICY.unlink()
@@ -1298,7 +1299,8 @@ def backup_retention_menu():
         if not raw.isdigit() or not 5 <= int(raw) <= 100:
             print("Enter a number from 5 to 100.")
             return
-        prune_old_backups(int(raw))
+        if confirm("Permanently remove local archives older than the selected retention limit?"):
+            prune_old_backups(int(raw))
     elif choice != "0":
         print("Invalid selection.")
 
