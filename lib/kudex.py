@@ -1416,6 +1416,7 @@ def dashboard():
     print(" [15] Bandwidth Monitor  [16] Restart Services")
     print(" [17] Ports & Server Info  [18] Stunnel4 & OpenVPN")
     print(" [19] SSH Security Manager [20] SlowDNS / DNSTT")
+    print(" [21] SSH Banner Editor    [22] Auto-Reboot Scheduler")
     print(" [00] Exit")
     print(cyan+"─"*64+reset)
 
@@ -1472,6 +1473,161 @@ def restart_services():
         try: run(["systemctl", "restart", unit]); print(f"{label}: restarted")
         except RuntimeError as exc: print(f"{label}: FAILED - {exc}")
 
+
+SSH_BANNER_FILE = pathlib.Path("/etc/issue.net")
+SSH_BANNER_DROPIN = pathlib.Path("/etc/ssh/sshd_config.d/99-kudex-banner.conf")
+REBOOT_SERVICE = pathlib.Path("/etc/systemd/system/kudex-auto-reboot.service")
+REBOOT_TIMER = pathlib.Path("/etc/systemd/system/kudex-auto-reboot.timer")
+
+def banner_menu():
+    require_root()
+    while True:
+        print("\n--- SSH BANNER EDITOR ---")
+        try:
+            current = SSH_BANNER_FILE.read_text()
+        except OSError:
+            current = ""
+        print("Current banner:")
+        print(current.rstrip() if current.strip() else "(empty)")
+        print("\n[1] Replace banner text")
+        print("[2] Disable Kudex SSH banner")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            print("Enter banner text. Finish with a line containing only .")
+            lines = []
+            while True:
+                line = input()
+                if line == ".":
+                    break
+                if len(line) > 300:
+                    print("Line too long (maximum 300 characters).")
+                    continue
+                lines.append(line)
+                if len(lines) > 30:
+                    print("Maximum 30 lines reached.")
+                    break
+            content = "\n".join(lines).strip() + "\n"
+            if not content.strip():
+                print("Empty banner rejected.")
+                continue
+            if not confirm("Save this text to /etc/issue.net and enable it for SSH logins?"):
+                continue
+            SSH_BANNER_FILE.write_text(content)
+            os.chmod(SSH_BANNER_FILE, 0o644)
+            SSH_BANNER_DROPIN.parent.mkdir(parents=True, exist_ok=True)
+            SSH_BANNER_DROPIN.write_text("Banner /etc/issue.net\n")
+            os.chmod(SSH_BANNER_DROPIN, 0o644)
+            try:
+                run(["sshd", "-t"])
+            except RuntimeError:
+                SSH_BANNER_DROPIN.unlink(missing_ok=True)
+                raise RuntimeError("sshd configuration validation failed; Kudex removed its banner drop-in. Review existing SSH configuration.")
+            run(["systemctl", "reload", "ssh.service"], check=False)
+            if service_state("ssh.service") == "unknown":
+                run(["systemctl", "reload", "sshd.service"], check=False)
+            print("SSH login banner saved and SSH configuration validated.")
+        elif choice == "2":
+            if not SSH_BANNER_DROPIN.exists():
+                print("No Kudex-managed SSH banner is enabled.")
+                continue
+            if confirm("Disable only the Kudex-managed SSH banner?"):
+                SSH_BANNER_DROPIN.unlink()
+                run(["sshd", "-t"])
+                run(["systemctl", "reload", "ssh.service"], check=False)
+                if service_state("ssh.service") == "unknown":
+                    run(["systemctl", "reload", "sshd.service"], check=False)
+                print("Kudex SSH banner disabled. /etc/issue.net was preserved.")
+        else:
+            print("Invalid selection.")
+
+def install_auto_reboot(hour, minute):
+    require_root()
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        raise RuntimeError("Enter a valid 24-hour time.")
+    if not confirm(f"Schedule this VPS to reboot every day at {hour:02d}:{minute:02d} server local time? This interrupts all users and tunnels."):
+        return False
+    REBOOT_SERVICE.write_text("""[Unit]
+Description=Kudex scheduled VPS reboot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl reboot
+""")
+    REBOOT_TIMER.write_text(f"""[Unit]
+Description=Kudex daily automatic reboot schedule
+
+[Timer]
+OnCalendar=*-*-* {hour:02d}:{minute:02d}:00
+Persistent=false
+Unit=kudex-auto-reboot.service
+
+[Install]
+WantedBy=timers.target
+""")
+    os.chmod(REBOOT_SERVICE, 0o644)
+    os.chmod(REBOOT_TIMER, 0o644)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", "--now", "kudex-auto-reboot.timer"])
+    print(f"Daily reboot scheduled for {hour:02d}:{minute:02d} server local time.")
+    return True
+
+def auto_reboot_menu():
+    require_root()
+    while True:
+        status = service_state("kudex-auto-reboot.timer")
+        print(f"\n--- AUTO-REBOOT SCHEDULER ---\nTimer: {status}")
+        if shutil.which("systemctl"):
+            run(["systemctl", "list-timers", "kudex-auto-reboot.timer", "--no-pager"], check=False)
+        print("[1] Set/replace daily reboot time")
+        print("[2] Disable scheduled reboot")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            raw = ask("Daily time in 24-hour HH:MM format (server local time)", "04:00")
+            match = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", raw)
+            if not match:
+                print("Invalid time. Example: 04:30")
+                continue
+            install_auto_reboot(int(match.group(1)), int(match.group(2)))
+        elif choice == "2":
+            if status != "unknown" and confirm("Disable the daily automatic reboot schedule?"):
+                run(["systemctl", "disable", "--now", "kudex-auto-reboot.timer"])
+                print("Automatic reboot schedule disabled.")
+        else:
+            print("Invalid selection.")
+
+def managed_service_units():
+    candidates = (
+        ("OpenSSH", "ssh.service"), ("Nginx", "nginx.service"),
+        ("Xray core", "xray.service"), ("Dropbear", "dropbear.service"),
+        ("Stunnel4 TLS", "stunnel4.service"), ("SlowDNS / DNSTT", "kudex-dnstt.service"),
+        ("OpenVPN", "openvpn.service"), ("OpenVPN server", "openvpn-server@server.service"),
+        ("OpenVPN instance", "openvpn@server.service"), ("Cron", "cron.service"),
+        ("HTTP proxy (Squid)", "squid.service"), ("Apache web server", "apache2.service"),
+    )
+    return [(label, unit) for label, unit in candidates if service_state(unit) != "unknown"]
+
+def expanded_service_menu():
+    while True:
+        units = managed_service_units()
+        print("\n--- SERVICE CONTROL ---")
+        for i, (label, unit) in enumerate(units, 1):
+            print(f"[{i:02d}] {label:<22} {service_state(unit)} ({unit})")
+        print("[0] Back")
+        choice = input("Select service: ").strip()
+        if choice == "0":
+            return
+        if not choice.isdigit() or not 1 <= int(choice) <= len(units):
+            print("Invalid selection.")
+            continue
+        label, unit = units[int(choice)-1]
+        service_menu(label, unit)
+
 def main():
     require_root(); ensure_dirs()
     if len(sys.argv) > 1:
@@ -1498,12 +1654,7 @@ def main():
             elif choice in ("6","06"): backup_menu()
             elif choice in ("7","07"): domain_ssl_menu()
             elif choice in ("8","08"): diagnostics()
-            elif choice in ("9","09"):
-                units = (("SSH","ssh.service"),("NGINX","nginx.service"),("XRAY","xray.service"),("DROPBEAR","dropbear.service"))
-                for label, unit in units: print(f"[{label}] {service_state(unit)}")
-                unit = ask("Service unit (ssh.service/nginx.service/xray.service/dropbear.service)")
-                if unit in {u for _,u in units}: service_menu(unit, unit)
-                else: print("Unsupported service.")
+            elif choice in ("9","09"): expanded_service_menu()
             elif choice == "10": install_xray()
             elif choice == "11":
                 apply_xray()
@@ -1517,6 +1668,8 @@ def main():
             elif choice == "18": optional_services_menu()
             elif choice == "19": ssh_security_menu()
             elif choice == "20": dnstt_menu()
+            elif choice == "21": banner_menu()
+            elif choice == "22": auto_reboot_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
