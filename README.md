@@ -147,6 +147,10 @@ transport settings, Kudex validates the generated configuration with
 `xray run -test` before restarting the Xray service. Keep your current SSH
 session open while making remote service changes.
 
+## Authenticated HTTP proxy (Squid)
+
+Menu **[25] Authenticated HTTP Proxy** can install and configure Squid on TCP/8880. Kudex configures username/password authentication, allows localhost and authenticated clients only, and denies all other proxy access. Create a proxy user from the manager before connecting. The generated configuration is parsed by Squid before the service is restarted, and the prior Squid configuration is backed up. Do not open TCP/8880 in the provider firewall until you have created credentials and confirmed the server is reachable only as intended. The password database is root-owned and readable by the Squid service group.
+
 ## Security notes
 
 - Use only on infrastructure you own or are authorized to administer.
