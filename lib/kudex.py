@@ -543,10 +543,13 @@ def ssh_menu():
         expire_due_accounts()
         print("\n--- SSH ACCOUNTS ---")
         print("[1] Create timed/trial user  [2] List users  [3] Lock user")
-        print("[4] Unlock user  [5] Delete user  [6] Renew account  [0] Back")
+        print("[4] Unlock user  [5] Delete user  [6] Renew account  [7] SSH security  [0] Back")
         c = input("Select: ").strip()
         if c == "0":
             return
+        if c == "7":
+            ssh_security_menu()
+            continue
         if c == "1":
             name = ask("Username")
             if not valid_name(name):
@@ -623,6 +626,122 @@ def ssh_menu():
                 atomic_json(SSH_ACCOUNTS, managed)
                 run(["usermod", "--unlock", name])
                 print(f"{name} renewed: {'unlimited' if days == 0 else str(days) + ' day(s)'}.")
+        else:
+            print("Invalid selection.")
+
+
+
+SSH_LIMITS = pathlib.Path("/etc/security/limits.d/99-kudex-vpn.conf")
+
+def pam_limits_enabled():
+    """Return whether an SSH PAM session appears to load pam_limits."""
+    candidates = (pathlib.Path("/etc/pam.d/sshd"),
+                  pathlib.Path("/etc/pam.d/common-session"),
+                  pathlib.Path("/etc/pam.d/common-session-noninteractive"))
+    for path in candidates:
+        try:
+            for line in path.read_text().splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#") and "pam_limits.so" in stripped:
+                    return True
+        except OSError:
+            continue
+    return False
+
+def ssh_login_limits():
+    """Read Kudex-owned maxlogins entries, ignoring unrelated limits."""
+    result = {}
+    try:
+        lines = SSH_LIMITS.read_text().splitlines()
+    except FileNotFoundError:
+        return result
+    for line in lines:
+        parts = line.split()
+        if len(parts) == 4 and parts[1:3] == ["hard", "maxlogins"] and valid_name(parts[0]) and parts[3].isdigit():
+            result[parts[0]] = int(parts[3])
+    return result
+
+def write_ssh_login_limits(entries):
+    """Atomically write only Kudex-managed per-user maxlogins rules."""
+    require_root()
+    SSH_LIMITS.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".kudex-limits-", dir=str(SSH_LIMITS.parent))
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write("# Managed by Kudex VPN Manager. Do not edit managed lines manually.\\n")
+            for username, maximum in sorted(entries.items()):
+                handle.write(f"{username} hard maxlogins {maximum}\\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, SSH_LIMITS)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+def set_ssh_login_limit(username, maximum):
+    require_root()
+    if not valid_name(username) or username == "root":
+        raise RuntimeError("Invalid or protected username.")
+    if not isinstance(maximum, int) or not 1 <= maximum <= 100:
+        raise RuntimeError("Maximum concurrent logins must be between 1 and 100.")
+    if subprocess.run(["id", username], stdout=subprocess.DEVNULL,
+                      stderr=subprocess.DEVNULL).returncode != 0:
+        raise RuntimeError("That Linux user does not exist.")
+    entries = ssh_login_limits()
+    entries[username] = maximum
+    write_ssh_login_limits(entries)
+
+def remove_ssh_login_limit(username):
+    require_root()
+    entries = ssh_login_limits()
+    if username not in entries:
+        return False
+    entries.pop(username)
+    write_ssh_login_limits(entries)
+    return True
+
+def ssh_security_menu():
+    while True:
+        print("\\n--- SSH SECURITY MANAGER ---")
+        print("[1] Set/update a user's concurrent-login limit")
+        print("[2] List Kudex login limits")
+        print("[3] Remove a user's login limit")
+        print("[4] Check PAM limit enforcement")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            username = ask("Existing SSH username")
+            raw = ask("Maximum simultaneous logins (1-100)", "1")
+            if not raw.isdigit():
+                print("Enter a whole number from 1 to 100.")
+                continue
+            set_ssh_login_limit(username, int(raw))
+            print(f"Limit saved: {username} may have up to {int(raw)} concurrent login(s).")
+            if not pam_limits_enabled():
+                print("WARNING: pam_limits.so was not detected in the common SSH PAM session files.")
+                print("The rule is saved, but enforcement may require PAM configuration. Kudex did not alter PAM.")
+        elif choice == "2":
+            entries = ssh_login_limits()
+            if not entries:
+                print("No per-user concurrent-login limits are configured.")
+            else:
+                for username, maximum in sorted(entries.items()):
+                    print(f"{username:<24} maximum concurrent logins: {maximum}")
+            print(f"PAM limits module detected: {'YES' if pam_limits_enabled() else 'NO'}")
+        elif choice == "3":
+            username = ask("Username whose limit should be removed")
+            if remove_ssh_login_limit(username):
+                print(f"Removed Kudex login limit for {username}.")
+            else:
+                print("No Kudex login limit exists for that user.")
+        elif choice == "4":
+            if pam_limits_enabled():
+                print("pam_limits.so detected in an SSH/common PAM session file.")
+            else:
+                print("pam_limits.so was not detected. Kudex will not edit PAM files automatically.")
         else:
             print("Invalid selection.")
 
@@ -1107,6 +1226,7 @@ def dashboard():
     print(" [13] Update Kudex       [14] Upgrade OS Packages")
     print(" [15] Bandwidth Monitor  [16] Restart Services")
     print(" [17] Ports & Server Info  [18] Stunnel4 & OpenVPN")
+    print(" [19] SSH Security Manager")
     print(" [00] Exit")
     print(cyan+"─"*64+reset)
 
@@ -1206,6 +1326,7 @@ def main():
             elif choice == "16": restart_services()
             elif choice == "17": ports_info()
             elif choice == "18": optional_services_menu()
+            elif choice == "19": ssh_security_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
