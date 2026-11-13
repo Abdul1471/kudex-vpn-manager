@@ -2892,6 +2892,9 @@ def google_drive_menu():
             if not remotes: print("No remotes configured. Use option 1."); continue
             print("Available: "+", ".join(remotes)); remote=ask("Remote name",remotes[0])
             if remote not in remotes: print("Choose a listed remote."); continue
+            remote_config=subprocess.run(["rclone","config","show",remote],text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
+            if remote_config.returncode or not re.search(r"(?m)^\\s*type\\s*=\\s*drive\\s*$",remote_config.stdout):
+                print("That rclone remote is not configured as Google Drive."); continue
             folder=ask("Remote folder path","KudexBackups")
             if not folder or folder.startswith("/") or ".." in pathlib.PurePosixPath(folder).parts: print("Use a relative path without '..'."); continue
             atomic_json(GOOGLE_DRIVE_CONFIG,{"remote":remote,"folder":folder})
