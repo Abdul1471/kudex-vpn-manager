@@ -55,7 +55,7 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
 
 ## First-time setup and cloud licensing
 
-1. Before installation, register the VPS public IP through the KudexTech licensing service's `/trialip` endpoint for a 24-hour trial, or have an administrator assign a 30-day or Lifetime license to that IP. The trial can be registered only once per IP.
+1. For a free 24-hour trial, connect to the VPS and run `curl -X POST https://kudex-license-api.yabdulqudus1471.workers.dev/trialip`. Run this command on the VPS itself so Cloudflare registers the VPS public IP, not your laptop or phone. The trial can be registered only once per IP. Alternatively, have an administrator assign a 30-day or Lifetime license to the VPS public IP.
 2. Keep your existing SSH session open. Run the installer from the repository root:
    `sudo bash install.sh`
 3. The installer bootstraps only `curl` and CA certificates, then sends a POST request to `https://kudex-license-api.yabdulqudus1471.workers.dev/api/authenticate`. Cloudflare supplies the caller IP to the API. If the IP is not licensed, the API is unreachable, or the response is invalid, installation stops before domain prompts and before VPN services are installed.
