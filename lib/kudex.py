@@ -804,6 +804,9 @@ def generate_dnstt_keys():
     os.chmod(DNSTT_PRIVATE_KEY, 0o600)
     os.chmod(DNSTT_PUBLIC_KEY, 0o644)
     print("DNSTT keypair generated. Keep server.key private; share only server.pub.")
+    if service_state("kudex-dnstt.service") == "active":
+        run(["systemctl", "restart", "kudex-dnstt.service"])
+        print("DNSTT service restarted to load the rotated keypair.")
     return True
 
 def dnstt_key_status():
