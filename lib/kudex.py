@@ -160,26 +160,52 @@ WantedBy=multi-user.target
     run(["systemctl", "enable", "xray.service"])
     print("Official Xray binary installed and systemd unit created.")
 
-def inbound(protocol, entries):
-    port = PORTS[protocol]
-    path = PATHS[protocol]
-    clients_cfg = []
+def reality_profile():
+    profile = read_json(REALITY_CONFIG, {})
+    return profile if isinstance(profile, dict) else {}
+
+def protocol_clients(protocol, entries, reality=False):
     if protocol == "vmess":
-        clients_cfg = [{"id": c["secret"], "alterId": 0, "email": c["name"], "security": "auto"} for c in entries]
-        settings = {"clients": clients_cfg, "disableInsecureEncryption": False}
-    elif protocol == "vless":
-        clients_cfg = [{"id": c["secret"], "email": c["name"]} for c in entries]
-        settings = {"clients": clients_cfg, "decryption": "none"}
-    elif protocol == "trojan":
-        clients_cfg = [{"password": c["secret"], "email": c["name"]} for c in entries]
-        settings = {"clients": clients_cfg}
-    else:
+        return [{"id": c["secret"], "alterId": 0, "email": c["name"], "security": "auto"} for c in entries]
+    if protocol == "vless":
+        return [{"id": c["secret"], "email": c["name"], **({"flow": "xtls-rprx-vision"} if reality else {})} for c in entries]
+    if protocol == "trojan":
+        return [{"password": c["secret"], "email": c["name"]} for c in entries]
+    return []
+
+def inbound(protocol, entries, transport="websocket"):
+    if protocol == "sshws":
+        port, path = PORTS[protocol], PATHS[protocol]
         settings = {"address": "127.0.0.1", "port": 22, "network": "tcp"}
-    return {"tag": protocol, "listen": "127.0.0.1", "port": port,
-            "protocol": "dokodemo-door" if protocol == "sshws" else protocol,
-            "settings": settings,
-            "streamSettings": {"network": "ws", "security": "none",
-                               "wsSettings": {"path": path, "headers": {"Host": state().get("domain", "")}}}}
+        proto_name = "dokodemo-door"
+    else:
+        port = PORTS[protocol] if transport == "websocket" else HTTPUPGRADE_PORTS[protocol]
+        path = PATHS[protocol] if transport == "websocket" else HTTPUPGRADE_PATHS[protocol]
+        settings = {"clients": protocol_clients(protocol, entries)}
+        if protocol == "vless":
+            settings["decryption"] = "none"
+        if protocol == "vmess":
+            settings["disableInsecureEncryption"] = False
+        proto_name = protocol
+    if transport == "httpupgrade":
+        stream = {"network": "httpupgrade", "security": "none",
+                  "httpupgradeSettings": {"path": path, "host": state().get("domain", "")}}
+    else:
+        stream = {"network": "ws", "security": "none",
+                  "wsSettings": {"path": path, "headers": {"Host": state().get("domain", "")}}}
+    return {"tag": protocol + ("-httpupgrade" if transport == "httpupgrade" else ""),
+            "listen": "127.0.0.1", "port": port, "protocol": proto_name,
+            "settings": settings, "streamSettings": stream}
+
+def reality_inbound(entries, profile):
+    users = [{"id": c["secret"], "email": c["name"], "flow": "xtls-rprx-vision"}
+             for c in entries if c.get("enabled", True)]
+    return {"tag": "vless-reality", "listen": "0.0.0.0", "port": REALITY_PORT,
+            "protocol": "vless", "settings": {"clients": users, "decryption": "none"},
+            "streamSettings": {"network": "tcp", "security": "reality",
+                "realitySettings": {"show": False, "target": profile["target"],
+                    "serverNames": [profile["server_name"]], "privateKey": profile["private_key"],
+                    "shortIds": [profile["short_id"]]}}}
 
 def build_xray_config():
     st = state()
@@ -187,11 +213,16 @@ def build_xray_config():
     ins = []
     for proto in ("vmess", "vless", "trojan"):
         if st.get("protocols", {}).get(proto, True):
-            ins.append(inbound(proto, [c for c in all_clients if c["protocol"] == proto and c.get("enabled", True)]))
+            selected = [c for c in all_clients if c["protocol"] == proto and c.get("enabled", True)]
+            ins.append(inbound(proto, selected))
+            if st.get("transports", {}).get(proto, {}).get("httpupgrade", False):
+                ins.append(inbound(proto, selected, "httpupgrade"))
     if st.get("protocols", {}).get("sshws", True):
         ins.append(inbound("sshws", []))
-    return {"log": {"loglevel": "warning"},
-            "inbounds": ins,
+    profile = reality_profile()
+    if profile.get("enabled") and st.get("protocols", {}).get("vless", True):
+        ins.append(reality_inbound([c for c in all_clients if c.get("protocol") == "vless"], profile))
+    return {"log": {"loglevel": "warning"}, "inbounds": ins,
             "outbounds": [{"protocol": "freedom", "tag": "direct"}]}
 
 def apply_xray():
