@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Kudex VPN Manager: terminal-first SSH and Xray administration."""
 from __future__ import annotations
-import base64, datetime, getpass, ipaddress, json, os, pathlib, platform, re, secrets, shutil, socket, string, subprocess, sys, tarfile, tempfile, urllib.parse, urllib.request, hashlib, time
+import base64, datetime, getpass, ipaddress, json, os, pathlib, platform, re, secrets, shutil, socket, string, subprocess, sys, tarfile, tempfile, urllib.parse, urllib.request, hashlib, time, grp
 
 ETC = pathlib.Path("/etc/kudex")
 STATE = ETC / "state.json"
@@ -1304,7 +1304,7 @@ def squid_proxy_configure():
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         shutil.copy2(SQUID_CONFIG, SQUID_CONFIG.with_name(f"squid.conf.kudex-backup-{stamp}"))
     SQUID_PASSWORDS.touch(mode=0o640, exist_ok=True)
-    os.chown(SQUID_PASSWORDS, 0, shutil.getgrnam("proxy").gr_gid if hasattr(shutil, "getgrnam") else 13)
+    os.chown(SQUID_PASSWORDS, 0, grp.getgrnam("proxy").gr_gid)
     SQUID_CONFIG.write_text(squid_proxy_config())
     os.chmod(SQUID_CONFIG, 0o640)
     test = subprocess.run(["squid", "-k", "parse"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
