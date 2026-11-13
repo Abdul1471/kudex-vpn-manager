@@ -25,6 +25,8 @@ Dropbear uses TCP/2222 to avoid conflict with OpenSSH. Provider firewalls/securi
 
 Clone this repository, enter its directory, and run:
 
+    git clone https://github.com/Abdul1471/kudex-vpn-manager.git
+    cd kudex-vpn-manager
     sudo bash install.sh
     sudo kudex
 
@@ -53,6 +55,7 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
     [09] SERVICE CONTROL
     [10] INSTALL/UPDATE XRAY
     [11] APPLY CONFIG
+    [12] RESTORE BACKUP
     [00] EXIT SYSTEM
 
 ## Network layout
