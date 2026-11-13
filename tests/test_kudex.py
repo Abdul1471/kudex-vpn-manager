@@ -225,6 +225,14 @@ class KudexSessionSafetyTests(unittest.TestCase):
         row = {"id": "8", "user": "root", "tty": "pts/3", "remote": True}
         self.assertFalse(kudex.session_termination_allowed(row, "7", "pts/2"))
 
+    def test_uid_zero_is_protected_even_if_name_is_unexpected(self):
+        row = {"id": "8", "uid": "0", "user": "admin-root-alias", "tty": "pts/3", "remote": True}
+        self.assertFalse(kudex.session_termination_allowed(row, "7", "pts/2"))
+
+    def test_pty_without_remote_flag_is_not_terminable(self):
+        row = {"id": "8", "uid": "1001", "user": "alice", "tty": "pts/3", "remote": False}
+        self.assertFalse(kudex.session_termination_allowed(row, "7", "pts/2"))
+
     def test_same_terminal_is_protected_even_with_different_session_id(self):
         row = {"id": "8", "user": "alice", "tty": "pts/2", "remote": True}
         self.assertFalse(kudex.session_termination_allowed(row, "7", "pts/2"))
