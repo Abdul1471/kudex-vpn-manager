@@ -1453,7 +1453,6 @@ def dante_configure():
                 probe.bind(("0.0.0.0", DANTE_PORT))
             except OSError as exc:
                 raise RuntimeError(f"TCP/{DANTE_PORT} is already in use; resolve the port conflict before enabling Dante.") from exc
-    run(["getent", "group", DANTE_GROUP], check=False)
     group = subprocess.run(["getent", "group", DANTE_GROUP], text=True,
                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     if group.returncode:
@@ -1509,15 +1508,22 @@ def dante_add_user():
     print(f"SOCKS account '{username}' is ready. SOCKS5 username/password is not encrypted in transit; use a protected tunnel.")
 
 def dante_list_users():
-    group = subprocess.run(["getent", "group", DANTE_GROUP], text=True,
-                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    if group.returncode:
-        print("No Kudex SOCKS users configured.")
+    entries = subprocess.run(["getent", "passwd"], text=True, stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL)
+    if entries.returncode:
+        print("Could not read system account database.")
         return
-    members = group.stdout.rstrip().split(":")[-1].split(",")
-    members = sorted(x for x in members if x.startswith("kpx_"))
+    members = []
+    for line in entries.stdout.splitlines():
+        username = line.split(":", 1)[0]
+        if not username.startswith("kpx_"):
+            continue
+        groups = subprocess.run(["id", "-nG", username], text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if groups.returncode == 0 and DANTE_GROUP in groups.stdout.split():
+            members.append(username)
     print("\nKudex SOCKS users:")
-    for username in members:
+    for username in sorted(members):
         print(" - " + username)
     if not members:
         print("No Kudex SOCKS users configured.")
