@@ -1996,7 +1996,7 @@ def backup(auto_upload=False):
     ensure_dirs()
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     target = BACKUPS / f"kudex-{stamp}.tar.gz"
-    items = [p for p in (ETC, XRAY_CONFIG, NGINX_SITE) if p.exists()]
+    items = [p for p in (ETC, XRAY_CONFIG, NGINX_SITE, OPENVPN_SERVER_DIR / "kudex", OPENVPN_SERVER_DIR / "kudex.conf") if p.exists()]
     with tarfile.open(target, "w:gz") as tf:
         for p in items:
             def exclude_telegram_secret(member):
@@ -2095,7 +2095,10 @@ def verify_kudex_backup(path):
     if path.parent.resolve() != BACKUPS.resolve() or not path.is_file():
         raise RuntimeError("Select a backup stored inside the Kudex backup directory.")
     allowed = {"etc/kudex/state.json", "etc/kudex/clients.json",
-               "etc/kudex/reality.json", "usr/local/etc/xray/config.json", "etc/nginx/sites-available/kudex.conf"}
+               "etc/kudex/reality.json", "usr/local/etc/xray/config.json", "etc/nginx/sites-available/kudex.conf",
+               "etc/openvpn/server/kudex.conf", "etc/openvpn/server/kudex/ca.crt",
+               "etc/openvpn/server/kudex/server.crt", "etc/openvpn/server/kudex/server.key",
+               "etc/openvpn/server/kudex/tls-crypt.key"}
     checked = []
     try:
         with tarfile.open(path, "r:gz") as archive:
@@ -2200,7 +2203,10 @@ def restore_backup():
     if not confirm(f"Restore protected configuration from {chosen.name}?"):
         return
     allowed = {"etc/kudex/state.json", "etc/kudex/clients.json",
-               "etc/kudex/reality.json", "usr/local/etc/xray/config.json", "etc/nginx/sites-available/kudex.conf"}
+               "etc/kudex/reality.json", "usr/local/etc/xray/config.json", "etc/nginx/sites-available/kudex.conf",
+               "etc/openvpn/server/kudex.conf", "etc/openvpn/server/kudex/ca.crt",
+               "etc/openvpn/server/kudex/server.crt", "etc/openvpn/server/kudex/server.key",
+               "etc/openvpn/server/kudex/tls-crypt.key"}
     staged = {}
     with tarfile.open(chosen, "r:gz") as tf:
         for member in tf.getmembers():
@@ -2213,7 +2219,12 @@ def restore_backup():
     targets = {
         "etc/kudex/state.json": STATE, "etc/kudex/clients.json": CLIENTS,
         "etc/kudex/reality.json": REALITY_CONFIG,
-        "usr/local/etc/xray/config.json": XRAY_CONFIG, "etc/nginx/sites-available/kudex.conf": NGINX_SITE
+        "usr/local/etc/xray/config.json": XRAY_CONFIG, "etc/nginx/sites-available/kudex.conf": NGINX_SITE,
+        "etc/openvpn/server/kudex.conf": OPENVPN_SERVER_DIR / "kudex.conf",
+        "etc/openvpn/server/kudex/ca.crt": OPENVPN_SERVER_DIR / "kudex/ca.crt",
+        "etc/openvpn/server/kudex/server.crt": OPENVPN_SERVER_DIR / "kudex/server.crt",
+        "etc/openvpn/server/kudex/server.key": OPENVPN_SERVER_DIR / "kudex/server.key",
+        "etc/openvpn/server/kudex/tls-crypt.key": OPENVPN_SERVER_DIR / "kudex/tls-crypt.key"
     }
     previous = {name: (path.read_bytes() if path.exists() else None) for name, path in targets.items() if name in staged}
     try:
