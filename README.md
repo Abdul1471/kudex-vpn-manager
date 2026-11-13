@@ -79,7 +79,14 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
     [12] RESTORE BACKUP
     [13] UPDATE KUDEX APPLICATION
     [14] UPGRADE UBUNTU/DEBIAN PACKAGES
+    [15] BANDWIDTH MONITOR (live; daily/monthly via optional vnStat)
+    [16] RESTART MANAGED SERVICES (SSH deliberately excluded)
+    [17] PORTS & SERVER INFO
     [00] EXIT SYSTEM
+
+## Terminal dashboard and monitoring
+
+The main screen shows live hostname, detected server interface IP, domain/TLS configuration, OS, local time, uptime, CPU and RAM readings, enabled VPN client counts, and actual systemd service states. Live traffic is read from `/proc/net/dev`. Historical daily/monthly totals are shown when optional `vnstat` is installed; Kudex does not invent historical totals when it is absent. Service states distinguish running, stopped, not installed, and waiting for TLS. The restart-all action intentionally excludes OpenSSH to reduce the risk of disconnecting a remote administrator.
 
 ## Network layout
 
