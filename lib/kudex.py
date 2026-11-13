@@ -371,6 +371,7 @@ def renew_client(proto):
     if not item:
         print("Account not found.")
         return
+    previous = json.loads(json.dumps(data))
     days = ask_duration()
     item["expires_at"] = expiry_from_days(days)
     item["enabled"] = True
@@ -379,8 +380,7 @@ def renew_client(proto):
     try:
         apply_xray()
     except Exception:
-        item["enabled"] = False
-        atomic_json(CLIENTS, data)
+        atomic_json(CLIENTS, previous)
         raise
     print(f"{name} renewed: {'unlimited' if days == 0 else str(days) + ' day(s)'}.")
 
@@ -401,6 +401,7 @@ def protocol_menu(proto):
             if st.get("domain") and st.get("tls"): apply_nginx()
         return
     while True:
+        expire_due_accounts()
         rows = [c for c in clients() if c.get("protocol") == proto]
         print(f"\n--- {PROTO_NAMES[proto]} ---")
         for item in rows:
@@ -488,6 +489,7 @@ def share_link(client):
 
 def ssh_menu():
     while True:
+        expire_due_accounts()
         print("\n--- SSH ACCOUNTS ---")
         print("[1] Create timed/trial user  [2] List users  [3] Lock user")
         print("[4] Unlock user  [5] Delete user  [6] Renew account  [0] Back")
@@ -902,6 +904,7 @@ def main():
         if sys.argv[1] == "upgrade": upgrade_system(); return
     expire_due_accounts()
     while True:
+        expire_due_accounts()
         dashboard()
         choice = input("\nSelect menu: ").strip()
         try:
