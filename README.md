@@ -149,3 +149,12 @@ Menu **[19] SSH Security Manager** sets a per-user hard `maxlogins` limit using 
 Menu [20] SLOWDNS / DNSTT builds the upstream dnstt-server from its Go source, generates a persistent server keypair, displays the public key, and can create a systemd service listening on UDP/53 and forwarding tunnel streams to a chosen local TCP service (default 127.0.0.1:22). The service runs as a dedicated unprivileged dnstt account with only CAP_NET_BIND_SERVICE; the private key is readable only by that account and root.
 
 A working DNS tunnel also requires a delegated DNS zone: create an A/AAAA record for the authoritative nameserver host pointing to this VPS, then delegate the tunnel subdomain with an NS record to that host. Allow inbound UDP/53 in provider and host firewalls. Kudex does not modify DNS records, firewall rules, or NAT. It refuses to start if UDP/53 is already occupied. Rotating the keypair invalidates the previous client public key; redistribute the new public key to authorized clients. Never share server.key.
+
+
+## SSH banner editor and scheduled reboot
+
+Menu [21] edits the SSH pre-login banner in /etc/issue.net and manages a dedicated sshd_config.d drop-in. Kudex validates the SSH daemon configuration with sshd -t before reloading the service. Disabling the feature removes only Kudex's drop-in and preserves the banner file.
+
+Menu [22] can schedule or disable a daily VPS reboot using a systemd timer. Reboot scheduling is off by default and requires explicit confirmation. Reboots interrupt SSH, VPN tunnels, and all hosted workloads; choose a maintenance window in the server's local timezone.
+
+Service Control [09] now discovers installed OpenSSH, Nginx, Xray, Dropbear, Stunnel4, DNSTT, OpenVPN, Cron, Squid, and Apache services. SSH stop/restart actions retain a separate confirmation warning.
