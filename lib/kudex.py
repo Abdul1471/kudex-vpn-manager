@@ -93,6 +93,23 @@ def valid_domain(domain):
         return False
     return all(re.fullmatch(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)", part) for part in domain.rstrip(".").split("."))
 
+def compose_domain(base_domain, subdomain=""):
+    """Return the configured hostname from a registered base domain and optional subdomain."""
+    base = (base_domain or "").strip().lower().rstrip(".")
+    sub = (subdomain or "").strip().lower().strip(".")
+    if not valid_domain(base):
+        raise RuntimeError("Invalid main domain name.")
+    if sub:
+        labels = sub.split(".")
+        if len(sub) > 253 or any(not re.fullmatch(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)", label) for label in labels):
+            raise RuntimeError("Invalid subdomain. Use DNS labels such as 'vpn' or 'node.eu'.")
+        hostname = sub + "." + base
+    else:
+        hostname = base
+    if not valid_domain(hostname):
+        raise RuntimeError("The combined domain and subdomain are invalid.")
+    return hostname
+
 def uuid4():
     import uuid
     return str(uuid.uuid4())
@@ -381,16 +398,26 @@ def certbot_issue_args(domain, webroot):
             "--keep-until-expiring"]
 
 
-def configure_domain(domain_input=None):
+def configure_domain(domain_input=None, subdomain_input=None):
     require_root()
     st = state()
-    domain = domain_input if domain_input is not None else ask(
-        "Domain name (A/AAAA record must point to this server)", st.get("domain", ""))
-    domain = domain.strip().lower()
-    if not valid_domain(domain):
-        raise RuntimeError("Invalid domain name.")
+    if domain_input is None:
+        base_domain = ask(
+            "Main domain name (A/AAAA record must point to this server)",
+            st.get("base_domain") or st.get("domain", ""))
+        subdomain = ask(
+            "Subdomain (for example vpn; leave blank to use the main domain)",
+            st.get("subdomain", ""))
+    else:
+        base_domain = domain_input
+        subdomain = subdomain_input or ""
+    domain = compose_domain(base_domain, subdomain)
+    # Store the composed hostname as the active endpoint while retaining
+    # the base domain and subdomain separately for future edits.
+    st.update({"base_domain": base_domain.strip().lower().rstrip("."),
+               "subdomain": subdomain.strip().lower().strip("."),
+               "domain": domain, "tls": False})
     # Email registration is intentionally disabled; retain no email requirement.
-    st.update({"domain": domain, "tls": False})
     st.pop("email", None)
     atomic_json(STATE, st)
     apply_nginx()
@@ -3258,7 +3285,8 @@ def main():
     if len(sys.argv) > 1:
         if sys.argv[1] == "--install-xray": install_xray(force="--yes" in sys.argv); return
         if sys.argv[1] == "--configure-domain":
-            configure_domain(sys.argv[2] if len(sys.argv) > 2 else None); return
+            configure_domain(sys.argv[2] if len(sys.argv) > 2 else None,
+                             sys.argv[3] if len(sys.argv) > 3 else None); return
         if sys.argv[1] in ("--apply-config", "apply"):
             apply_xray()
             if state().get("domain"): apply_nginx()
