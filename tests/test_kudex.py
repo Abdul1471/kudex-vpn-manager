@@ -72,6 +72,26 @@ class KudexValidationTests(unittest.TestCase):
         self.assertEqual(config["inbounds"][3]["protocol"], "dokodemo-door")
         self.assertEqual(config["inbounds"][3]["settings"]["port"], 22)
 
+    @mock.patch.object(kudex, "state", return_value={
+        "domain": "vpn.example.com",
+        "protocols": {"vmess": True, "vless": True, "trojan": True, "sshws": True},
+        "transports": {"vmess": {"httpupgrade": True}, "vless": {"httpupgrade": False},
+                       "trojan": {"httpupgrade": True}}
+    })
+    @mock.patch.object(kudex, "clients", return_value=[])
+    @mock.patch.object(kudex, "reality_profile", return_value={
+        "enabled": True, "target": "www.example.com:443", "server_name": "www.example.com",
+        "private_key": "private", "public_key": "public", "short_id": "a1b2c3d4"
+    })
+    def test_build_config_adds_enabled_httpupgrade_and_reality_inbounds(self, _profile, _clients, _state):
+        config = kudex.build_xray_config()
+        tags = {item["tag"]: item for item in config["inbounds"]}
+        self.assertIn("vmess-httpupgrade", tags)
+        self.assertNotIn("vless-httpupgrade", tags)
+        self.assertIn("trojan-httpupgrade", tags)
+        self.assertIn("vless-reality", tags)
+        self.assertEqual(tags["vless-reality"]["port"], 8443)
+
     def test_httpupgrade_inbound_has_separate_loopback_listener(self):
         with mock.patch.object(kudex, "state", return_value={"domain": "vpn.example.com"}):
             inbound = kudex.inbound("vless", [], "httpupgrade")
