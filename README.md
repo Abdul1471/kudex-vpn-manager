@@ -1,84 +1,90 @@
 # Kudex VPN Manager
 
-A terminal-first VPN and tunnel administration toolkit for Ubuntu and Debian.
+Kudex VPN Manager is a terminal-only administration tool for SSH accounts and Xray-based VMess, VLESS, Trojan, and SSH-over-WebSocket services.
 
-> **Status: Foundation release (v0.1.0).** The installer, interactive CLI, service controls, diagnostics, and SSH account workflows are being established first. Xray protocol provisioning (VMess, VLESS, Trojan), WebSocket routing, and automated certificate management are planned modules; do not treat them as production-ready until their implementation and tests land.
+> Current implementation: v0.2.0. Protocol provisioning, client CRUD, Xray config validation, Nginx WebSocket reverse proxy, Let's Encrypt webroot issuance, service controls, diagnostics, and configuration backups are implemented. Test on a fresh VPS before production use.
 
 ## Supported systems
-
 - Ubuntu 22.04 / 24.04 LTS
 - Debian 12 (Bookworm)
+- amd64, arm64 and armv7 architectures supported by the pinned official Xray release
 
-Other releases are not yet tested and are intentionally rejected by the installer.
+## Components
 
-## Included service targets
+| Component | Purpose | Default |
+|---|---|---|
+| OpenSSH | SSH accounts, TCP/22 | enabled |
+| Dropbear | Secondary SSH daemon, TCP/2222 | enabled |
+| Nginx | HTTPS termination and WebSocket reverse proxy | enabled |
+| Xray | VMess, VLESS, Trojan and SSH-WS inbounds | install from menu |
+| SSH-WS | WebSocket bridge to OpenSSH TCP/22 | enabled in app config |
 
-| Component | Purpose |
-|---|---|
-| OpenSSH | SSH accounts and remote access |
-| Dropbear | Lightweight SSH daemon (optional package) |
-| Nginx | Reverse proxy and future WebSocket front end |
-| Xray | VMess, VLESS and Trojan core (protocol module planned) |
-| SSH-WS | SSH over WebSocket (routing module planned) |
-
-The menu shows service state; it does not imply that an unimplemented protocol is already provisioned.
+Dropbear uses TCP/2222 to avoid conflict with OpenSSH. Provider firewalls/security groups must allow TCP/80, 443, 22, and optionally 2222. Installer does not alter UFW/nftables or cloud firewall rules.
 
 ## Install
 
-Clone the repository and run:
+Clone this repository, enter its directory, and run:
 
-```bash
-git clone https://github.com/Abdul1471/kudex-vpn-manager.git
-cd kudex-vpn-manager
-sudo bash install.sh
-```
+    sudo bash install.sh
+    sudo kudex
 
-Then launch:
+Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does not change OpenSSH port or rewrite sshd_config. Existing Dropbear defaults are backed up before setting port 2222 and disabling Dropbear root login.
 
-```bash
-sudo kudex
-```
+## First-time setup
 
-## Safety notes
-
-- Run only on a server you own or are authorized to administer.
-- Keep an existing SSH session open while changing SSH settings.
-- The installer does not replace your SSH configuration or change firewall rules.
-- No default public passwords, hidden accounts, or stealth mechanisms are created.
-- Review any proposed firewall, TLS, or listener changes before applying them.
-- Back up `/etc/ssh`, `/etc/nginx`, and `/usr/local/etc/xray` before manual changes.
+1. Keep your existing SSH session open.
+2. Allow provider firewall TCP ports 80 and 443; allow 2222 only if Dropbear is needed.
+3. Choose [10] Install/Update Xray. The app downloads pinned official Xray-core v26.10.31 and verifies the archive against its accompanying SHA-256 digest.
+4. Choose [07] DOMAIN & SSL. Enter a DNS name pointing to this server and a valid email. Certbot uses HTTP-01; public TCP/80 must be reachable.
+5. Choose [11] APPLY CONFIG to validate and start Xray. Nginx config is tested before reload.
+6. Add VMess, VLESS or Trojan accounts using menus [02], [03], [04]. Share URIs are shown only after TLS is ready.
+7. For SSH over WebSocket, create a normal SSH account in menu [01], then enable SSH-WS in menu [05]. WebSocket path /ssh forwards to OpenSSH; SSH authentication remains enabled.
 
 ## Menu
 
-```text
-SSH       : service state
-NGINX     : service state
-XRAY      : service state
-DROPBEAR  : service state
-SSH-WS    : planned module
+    [01] SSH [Menu]
+    [02] VMESS [Menu]
+    [03] VLESS [Menu]
+    [04] TROJAN [Menu]
+    [05] SSH-WEBSOCKET [Menu]
+    [06] BACKUP
+    [07] DOMAIN & SSL
+    [08] CHECK RUNNING
+    [09] SERVICE CONTROL
+    [10] INSTALL/UPDATE XRAY
+    [11] APPLY CONFIG
+    [00] EXIT SYSTEM
 
-[01] SSH       [Menu]
-[02] VMESS     [Menu]  (planned)
-[03] VLESS     [Menu]  (planned)
-[04] TROJAN    [Menu]  (planned)
-[06] BACKUP
-[07] DOMAIN & SSL (planned)
-[08] CHECK RUNNING
-[00] EXIT SYSTEM
-```
+## Network layout
 
-## Project layout
+Xray listens on loopback only:
+- VMess WS: 127.0.0.1:10001, path /vmess
+- VLESS WS: 127.0.0.1:10002, path /vless
+- Trojan WS: 127.0.0.1:10003, path /trojan
+- SSH-WS: 127.0.0.1:10004, path /ssh, forwards to 127.0.0.1:22
 
-```text
-bin/kudex             Terminal menu
-lib/common.sh         Shared validation and service helpers
-install.sh            Dependency and launcher installer
-```
+Nginx terminates TLS on TCP/443 and proxies WebSocket paths to Xray. Xray inbounds are not exposed directly on the public interface.
 
-## Uninstall
+## Security notes
 
-No automatic destructive uninstaller is provided in this foundation release. Remove the launcher and project files manually after reviewing what was installed.
+- Use only on infrastructure you own or are authorized to administer.
+- No hidden accounts, default VPN passwords, interception, or stealth features are created.
+- Account secrets and state are stored under /etc/kudex with root-only permissions.
+- Xray config is tested before activation; Nginx config is tested before reload.
+- OpenSSH configuration is not modified. Keep an existing SSH session open during remote-access changes.
+- SSH-WS is only a transport bridge; it does not bypass SSH authentication.
+- Dropbear root login is disabled. Confirm TCP/2222 is allowed by your provider firewall before relying on it.
+- Certbot renewal is managed by the system package timer; verify with certbot renew --dry-run.
+- Backups contain credentials and must be protected. Never publish client URIs; they contain secrets.
+
+## Troubleshooting
+
+    sudo systemctl status xray nginx ssh dropbear
+    sudo journalctl -u xray -n 100 --no-pager
+    sudo journalctl -u nginx -n 100 --no-pager
+    sudo nginx -t
+    sudo /usr/local/bin/xray run -test -config /usr/local/etc/xray/config.json
+    sudo certbot renew --dry-run
 
 ## License
-
-MIT. See [LICENSE](LICENSE).
+MIT. See LICENSE.
