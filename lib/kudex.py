@@ -188,9 +188,7 @@ def build_xray_config():
         ins.append(inbound("sshws", []))
     return {"log": {"loglevel": "warning"},
             "inbounds": ins,
-            "outbounds": [{"protocol": "freedom", "tag": "direct"},
-                          {"protocol": "blackhole", "tag": "blocked"}],
-            "routing": {"rules": [{"type": "field", "ip": ["geoip:private"], "outboundTag": "blocked"}]}}
+            "outbounds": [{"protocol": "freedom", "tag": "direct"}]}
 
 def apply_xray():
     require_root()
@@ -290,6 +288,21 @@ def configure_domain():
     print("TLS certificate issued. Certbot renewal timer should manage renewals.")
 
 def protocol_menu(proto):
+    if proto == "sshws":
+        st = state()
+        print("\n--- SSH OVER WEBSOCKET ---")
+        print("This exposes the existing SSH daemon through Xray WebSocket at path /ssh.")
+        print("SSH authentication remains enforced by OpenSSH; create a normal SSH user in menu 01.")
+        print(f"Endpoint: {st.get('domain') or 'YOUR_DOMAIN'}:443/ssh (TLS required)")
+        if confirm("Enable SSH over WebSocket?"):
+            st.setdefault("protocols", {})["sshws"] = True
+            atomic_json(STATE, st); apply_xray()
+            if st.get("domain") and st.get("tls"): apply_nginx()
+        elif confirm("Disable SSH over WebSocket?"):
+            st.setdefault("protocols", {})["sshws"] = False
+            atomic_json(STATE, st); apply_xray()
+            if st.get("domain") and st.get("tls"): apply_nginx()
+        return
     while True:
         print(f"\n--- {PROTO_NAMES[proto]} ---")
         rows = [c for c in clients() if c["protocol"] == proto]
@@ -343,7 +356,7 @@ def share_link(client):
         obj = {"v": "2", "ps": name, "add": host, "port": "443", "id": secret,
                "aid": "0", "scy": "auto", "net": "ws", "type": "none",
                "host": host, "path": path, "tls": "tls", "sni": host}
-        return "vmess://" + base64.urlsafe_b64encode(json.dumps(obj, separators=(",", ":")).encode()).decode().rstrip("=")
+        return "vmess://" + base64.b64encode(json.dumps(obj, separators=(",", ":")).encode()).decode().rstrip("=")
     query = urllib.parse.urlencode({"type": "ws", "security": "tls", "path": path, "host": host, "sni": host})
     if client["protocol"] == "vless":
         return f"vless://{secret}@{host}:443?{query}#{urllib.parse.quote(name)}"
@@ -413,6 +426,9 @@ def diagnostics():
 
 def main():
     require_root(); ensure_dirs()
+    if len(sys.argv) > 1 and sys.argv[1] == "--install-xray":
+        install_xray()
+        return
     while True:
         st = state()
         print("\n" + "=" * 46 + "\n           KUDEX VPN MANAGER\n" + "=" * 46)
