@@ -1436,7 +1436,7 @@ def backup(auto_upload=False):
     if BACKUP_SYNC_CONFIG.exists():
         try:
             sync_backup_to_mount(target)
-        except RuntimeError as exc:
+        except (RuntimeError, OSError) as exc:
             print(f"[BACKUP SYNC WARNING] {exc}")
     if auto_upload and telegram_settings():
         try:
@@ -1843,6 +1843,9 @@ def dashboard():
     print(f" Latest Backup  : {latest_backup}")
     print(f" Backup Timer   : {service_state('kudex-backup.timer')}")
     print(f" Reboot Timer   : {service_state('kudex-auto-reboot.timer')}")
+    print(f" Backup Sync    : {'MOUNTED' if configured_backup_mount() else 'NOT READY'}")
+    retention = backup_retention_count()
+    print(f" Retention      : {str(retention) + ' archives' if retention else 'DISABLED'}")
     print(gold+"\n CLIENT STATISTICS"+reset)
     print(f" SSH users: {ssh_count} | VMess: {counts['vmess']} | VLESS: {counts['vless']} | Trojan: {counts['trojan']}")
     print(gold+"\n SERVICE STATUS"+reset)
