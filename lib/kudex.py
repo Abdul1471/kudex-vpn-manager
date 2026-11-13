@@ -668,9 +668,9 @@ def write_ssh_login_limits(entries):
     fd, tmp = tempfile.mkstemp(prefix=".kudex-limits-", dir=str(SSH_LIMITS.parent))
     try:
         with os.fdopen(fd, "w") as handle:
-            handle.write("# Managed by Kudex VPN Manager. Do not edit managed lines manually.\\n")
+            handle.write("# Managed by Kudex VPN Manager. Do not edit managed lines manually.\n")
             for username, maximum in sorted(entries.items()):
-                handle.write(f"{username} hard maxlogins {maximum}\\n")
+                handle.write(f"{username} hard maxlogins {maximum}\n")
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(tmp, 0o644)
@@ -703,7 +703,7 @@ def remove_ssh_login_limit(username):
 
 def ssh_security_menu():
     while True:
-        print("\\n--- SSH SECURITY MANAGER ---")
+        print("\n--- SSH SECURITY MANAGER ---")
         print("[1] Set/update a user's concurrent-login limit")
         print("[2] List Kudex login limits")
         print("[3] Remove a user's login limit")
