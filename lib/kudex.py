@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Kudex VPN Manager: terminal-first SSH and Xray administration."""
 from __future__ import annotations
-import base64, datetime, getpass, ipaddress, json, os, pathlib, platform, re, secrets, shutil, socket, string, subprocess, sys, tarfile, tempfile, urllib.parse, urllib.request, hashlib
+import base64, datetime, getpass, ipaddress, json, os, pathlib, platform, re, secrets, shutil, socket, string, subprocess, sys, tarfile, tempfile, urllib.parse, urllib.request, hashlib, time
 
 ETC = pathlib.Path("/etc/kudex")
 STATE = ETC / "state.json"
@@ -582,58 +582,197 @@ def upgrade_system():
     run(["apt-get", "upgrade", "-y"])
     print("System package upgrade completed. Review any service restart notices above.")
 
+def human_bytes(value):
+    amount = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if amount < 1024 or unit == "TiB": return f"{amount:.1f} {unit}"
+        amount /= 1024
+
+def system_memory():
+    try:
+        data = {}
+        for line in pathlib.Path("/proc/meminfo").read_text().splitlines():
+            key, value = line.split(":", 1)
+            data[key] = int(value.strip().split()[0]) * 1024
+        total = data.get("MemTotal", 0)
+        free = data.get("MemAvailable", data.get("MemFree", 0))
+        return total, max(0, total-free), free
+    except (OSError, ValueError): return 0, 0, 0
+
+def system_cpu_percent():
+    def sample():
+        n = [int(x) for x in pathlib.Path("/proc/stat").read_text().splitlines()[0].split()[1:]]
+        return sum(n), n[3] + (n[4] if len(n) > 4 else 0)
+    try:
+        a = sample(); time.sleep(0.12); b = sample()
+        total, idle = b[0]-a[0], b[1]-a[1]
+        return max(0.0, min(100.0, (1-idle/total)*100)) if total else None
+    except (OSError, ValueError, IndexError): return None
+
+def system_uptime():
+    try:
+        sec = int(float(pathlib.Path("/proc/uptime").read_text().split()[0]))
+        d, sec = divmod(sec, 86400); h, sec = divmod(sec, 3600); m = sec//60
+        return (f"{d}d " if d else "") + (f"{h}h " if h or d else "") + f"{m}m"
+    except (OSError, ValueError, IndexError): return "unknown"
+
+def server_ip():
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("1.1.1.1", 80)); ip = sock.getsockname()[0]; sock.close()
+        return ip
+    except OSError: return "unavailable"
+
+def service_summary():
+    checks = (("SSH", ("ssh.service", "sshd.service")), ("NGINX", ("nginx.service",)),
+              ("XRAY", ("xray.service",)), ("DROPBEAR", ("dropbear.service",)))
+    result = {}
+    for label, units in checks:
+        states = [service_state(u) for u in units]
+        result[label] = "RUNNING" if "active" in states else ("NOT INSTALLED" if all(x == "unknown" for x in states) else "STOPPED")
+    st = state()
+    result["SSH-WS"] = "DISABLED" if not st.get("protocols", {}).get("sshws", True) else (
+        "RUNNING" if result["XRAY"] == "RUNNING" and st.get("tls") else "WAITING FOR TLS")
+    return result
+
+def dashboard():
+    if sys.stdout.isatty(): os.system("clear")
+    st = state(); total, used, free = system_memory(); cpu = system_cpu_percent()
+    now = datetime.datetime.now().astimezone()
+    counts = {p: sum(1 for c in clients() if c.get("protocol") == p and c.get("enabled", True))
+              for p in ("vmess", "vless", "trojan")}
+    try:
+        p = subprocess.run(["bash", "-lc", "getent passwd | awk -F: '$7 ~ /(bash|sh|zsh)$/ {n++} END {print n+0}'"],
+                           text=True, capture_output=True, check=False)
+        ssh_count = int(p.stdout.strip() or "0")
+    except (OSError, ValueError): ssh_count = 0
+    cyan = "\033[96m" if sys.stdout.isatty() else ""; gold = "\033[93m" if sys.stdout.isatty() else ""
+    reset = "\033[0m" if sys.stdout.isatty() else ""
+    print(cyan+"╔══════════════════════════════════════════════════════════════╗")
+    print("║                       KUDEX VPN MANAGER                      ║")
+    print("╚══════════════════════════════════════════════════════════════╝"+reset)
+    print(gold+" VPS INFORMATION"+reset)
+    print(f" Hostname       : {socket.gethostname()}")
+    print(f" Server IP      : {server_ip()}")
+    print(f" Domain         : {st.get('domain') or 'NOT CONFIGURED'}")
+    print(f" Operating System: {platform.platform()}")
+    print(f" Current Time   : {now.strftime('%d-%m-%Y %H:%M:%S %Z')}")
+    print(f" Uptime         : {system_uptime()}")
+    print(f" CPU Usage      : {cpu:.1f}%" if cpu is not None else " CPU Usage      : unavailable")
+    print(f" RAM            : {human_bytes(used)} used / {human_bytes(total)} total / {human_bytes(free)} free")
+    print(f" TLS            : {'ENABLED' if st.get('tls') else 'NOT CONFIGURED'}")
+    print(gold+"\n CLIENT STATISTICS"+reset)
+    print(f" SSH users: {ssh_count} | VMess: {counts['vmess']} | VLESS: {counts['vless']} | Trojan: {counts['trojan']}")
+    print(gold+"\n SERVICE STATUS"+reset)
+    for label, status in service_summary().items(): print(f" {label:<12}: {status}")
+    print(gold+"\n MAIN MENU"+reset)
+    print(" [01] SSH Accounts       [02] VMess Accounts")
+    print(" [03] VLESS Accounts     [04] Trojan Accounts")
+    print(" [05] SSH over WebSocket [06] Backup Manager")
+    print(" [07] Domain & SSL       [08] Server Health")
+    print(" [09] Service Control    [10] Install/Update Xray")
+    print(" [11] Apply Configuration[12] Restore Backup")
+    print(" [13] Update Kudex       [14] Upgrade OS Packages")
+    print(" [15] Bandwidth Monitor  [16] Restart Services")
+    print(" [17] Ports & Server Info")
+    print(" [00] Exit")
+    print(cyan+"─"*64+reset)
+
+def network_counters():
+    result = {}
+    try:
+        for line in pathlib.Path("/proc/net/dev").read_text().splitlines()[2:]:
+            if ":" not in line: continue
+            iface, raw = line.split(":", 1); f = raw.split()
+            if len(f) >= 9 and iface.strip() != "lo": result[iface.strip()] = (int(f[0]), int(f[8]))
+    except (OSError, ValueError): pass
+    return result
+
+def bandwidth_menu():
+    while True:
+        print("\n--- BANDWIDTH MONITOR ---\n[1] Live Traffic\n[2] Daily Usage (vnStat)\n[3] Monthly Usage (vnStat)\n[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0": return
+        if choice == "1":
+            print("Monitoring interfaces. Press CTRL-C to stop.")
+            try:
+                old = network_counters()
+                while True:
+                    time.sleep(1); new = network_counters()
+                    for iface, (rx, tx) in new.items():
+                        pr, pt = old.get(iface, (rx, tx))
+                        print(f"{iface}: RX {human_bytes(max(0,rx-pr))}/s | TX {human_bytes(max(0,tx-pt))}/s")
+                    old = new
+            except KeyboardInterrupt: print("\nLive monitor stopped.")
+        elif choice in ("2", "3"):
+            if not shutil.which("vnstat"):
+                print("vnStat is not installed; historical usage is unavailable.")
+            else: run(["vnstat", "-d" if choice == "2" else "-m"], check=False)
+        else: print("Invalid selection.")
+
+def ports_info():
+    print("\n--- KUDEX SERVICE PORTS ---")
+    print("OpenSSH       : TCP/22 (existing SSH configuration)")
+    print("Dropbear      : TCP/2222 (when installed)")
+    print("Nginx HTTP    : TCP/80")
+    print("Nginx HTTPS   : TCP/443 (when TLS configured)")
+    for proto in ("vmess", "vless", "trojan", "sshws"):
+        print(f"{PROTO_NAMES[proto]:<14}: 127.0.0.1:{PORTS[proto]} {PATHS[proto]}")
+    print("\n--- LISTENING SOCKETS ---")
+    if shutil.which("ss"): run(["ss", "-lntup"], check=False)
+
+def restart_services():
+    units = (("nginx.service", "Nginx"), ("xray.service", "Xray"), ("dropbear.service", "Dropbear"))
+    available = [(unit, label) for unit, label in units if service_state(unit) != "unknown"]
+    print("OpenSSH is deliberately excluded to protect your remote session.")
+    if not available: print("No managed services detected."); return
+    if not confirm("Restart "+", ".join(label for _,label in available)+"?"): return
+    for unit, label in available:
+        try: run(["systemctl", "restart", unit]); print(f"{label}: restarted")
+        except RuntimeError as exc: print(f"{label}: FAILED - {exc}")
+
 def main():
     require_root(); ensure_dirs()
     if len(sys.argv) > 1:
-        if sys.argv[1] == "--install-xray":
-            install_xray(force="--yes" in sys.argv); return
-        if sys.argv[1] == "--apply-config" or sys.argv[1] == "apply":
+        if sys.argv[1] == "--install-xray": install_xray(force="--yes" in sys.argv); return
+        if sys.argv[1] in ("--apply-config", "apply"):
             apply_xray()
             if state().get("domain"): apply_nginx()
             return
-        if sys.argv[1] == "update":
-            update_app(); return
-        if sys.argv[1] == "upgrade":
-            upgrade_system(); return
+        if sys.argv[1] == "update": update_app(); return
+        if sys.argv[1] == "upgrade": upgrade_system(); return
     while True:
-        st = state()
-        print("\n" + "=" * 46 + "\n           KUDEX VPN MANAGER\n" + "=" * 46)
-        for label, unit in (("SSH", "ssh.service"), ("NGINX", "nginx.service"), ("XRAY", "xray.service"), ("DROPBEAR", "dropbear.service")):
-            print(f"{label:<12}: {service_state(unit).upper()}")
-        ws_enabled = st.get("protocols", {}).get("sshws", True)
-        ws_status = "OFF" if not ws_enabled else ("ON" if service_state("xray.service") == "active" and st.get("tls") else "WAITING FOR TLS")
-        print(f"{'SSH-WS':<12}: {ws_status}")
-        print("\n[01] SSH [Menu]\n[02] VMESS [Menu]\n[03] VLESS [Menu]\n[04] TROJAN [Menu]\n[05] SSH-WEBSOCKET [Menu]")
-        print("[06] BACKUP  [07] DOMAIN & SSL  [08] CHECK RUNNING  [12] RESTORE BACKUP")
-        print("[09] SERVICE CONTROL  [10] INSTALL/UPDATE XRAY  [11] APPLY CONFIG")
-        print("[13] UPDATE KUDEX APPLICATION  [14] UPGRADE UBUNTU/DEBIAN PACKAGES")
-        print("[00] EXIT SYSTEM")
-        choice = input("\nSelect option: ").strip()
+        dashboard()
+        choice = input("\nSelect menu: ").strip()
         try:
-            if choice in ("1", "01"): ssh_menu()
-            elif choice in ("2", "02"): protocol_menu("vmess")
-            elif choice in ("3", "03"): protocol_menu("vless")
-            elif choice in ("4", "04"): protocol_menu("trojan")
-            elif choice in ("5", "05"): protocol_menu("sshws")
-            elif choice in ("6", "06"): backup()
-            elif choice in ("7", "07"): configure_domain()
-            elif choice in ("8", "08"): diagnostics()
-            elif choice == "9":
-                for label, unit in (("SSH", "ssh.service"), ("NGINX", "nginx.service"), ("XRAY", "xray.service"), ("DROPBEAR", "dropbear.service")):
-                    print(f"[{label}] {unit}")
-                unit = ask("Enter service unit (ssh.service/nginx.service/xray.service/dropbear.service)")
-                if unit in ("ssh.service", "nginx.service", "xray.service", "dropbear.service"): service_menu(unit, unit)
+            if choice in ("1","01"): ssh_menu()
+            elif choice in ("2","02"): protocol_menu("vmess")
+            elif choice in ("3","03"): protocol_menu("vless")
+            elif choice in ("4","04"): protocol_menu("trojan")
+            elif choice in ("5","05"): protocol_menu("sshws")
+            elif choice in ("6","06"): backup()
+            elif choice in ("7","07"): configure_domain()
+            elif choice in ("8","08"): diagnostics()
+            elif choice in ("9","09"):
+                units = (("SSH","ssh.service"),("NGINX","nginx.service"),("XRAY","xray.service"),("DROPBEAR","dropbear.service"))
+                for label, unit in units: print(f"[{label}] {service_state(unit)}")
+                unit = ask("Service unit (ssh.service/nginx.service/xray.service/dropbear.service)")
+                if unit in {u for _,u in units}: service_menu(unit, unit)
                 else: print("Unsupported service.")
             elif choice == "10": install_xray()
-            elif choice == "11": apply_xray(); apply_nginx() if state().get("domain") else None
+            elif choice == "11":
+                apply_xray()
+                if state().get("domain"): apply_nginx()
             elif choice == "12": restore_backup()
             elif choice == "13": update_app()
             elif choice == "14": upgrade_system()
-            elif choice in ("0", "00"): print("Kudex session closed."); return
+            elif choice == "15": bandwidth_menu()
+            elif choice == "16": restart_services()
+            elif choice == "17": ports_info()
+            elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
-        except (RuntimeError, OSError, ValueError) as exc:
-            print(f"\n[ERROR] {exc}")
-        input("\nPress Enter to continue...")
+        except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
+        input("\nPress Enter to return to the main menu...")
 
 if __name__ == "__main__":
     try: main()
