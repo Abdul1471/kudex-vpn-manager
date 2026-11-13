@@ -185,5 +185,27 @@ class KudexValidationTests(unittest.TestCase):
             self.assertTrue((root / names[-1]).exists())
             self.assertTrue((root / "notes.txt").exists())
 
+    def test_badvpn_unit_is_restricted_and_uses_validated_port(self):
+        text = kudex.badvpn_service_text("/usr/bin/badvpn-udpgw", "127.0.0.1", 7300)
+        self.assertIn("--listen-addr 127.0.0.1 --listen-port 7300", text)
+        self.assertIn("--max-clients 256", text)
+        self.assertIn("NoNewPrivileges=true", text)
+
+    def test_google_drive_settings_reject_path_traversal(self):
+        with mock.patch.object(kudex, "read_json", return_value={"remote": "drive", "folder": "../escape"}):
+            self.assertIsNone(kudex.google_drive_settings())
+
+    def test_google_drive_settings_accept_relative_folder(self):
+        with mock.patch.object(kudex, "read_json", return_value={"remote": "gdrive", "folder": "KudexBackups"}):
+            self.assertEqual(kudex.google_drive_settings(), {"remote": "gdrive", "folder": "KudexBackups"})
+
+    def test_openvpn_profile_templates_avoid_default_route_push(self):
+        # The generated server template is intentionally a routed subnet only.
+        import inspect
+        source = inspect.getsource(kudex.openvpn_provision)
+        self.assertIn("server 10.8.0.0 255.255.255.0", source)
+        self.assertNotIn("push \"redirect-gateway", source)
+        self.assertIn("tls-crypt", source)
+
 if __name__ == "__main__":
     unittest.main()
