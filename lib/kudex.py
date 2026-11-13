@@ -603,6 +603,75 @@ def backup():
     os.chmod(target, 0o600)
     print(f"Backup created: {target}")
 
+
+def install_backup_schedule(hours):
+    require_root()
+    if hours not in (12, 24):
+        raise RuntimeError("Backup interval must be 12 or 24 hours.")
+    service = pathlib.Path("/etc/systemd/system/kudex-backup.service")
+    timer = pathlib.Path("/etc/systemd/system/kudex-backup.timer")
+    app = pathlib.Path("/opt/kudex-vpn-manager/lib/kudex.py")
+    if not app.exists():
+        raise RuntimeError("Kudex is not installed in /opt/kudex-vpn-manager.")
+    service.write_text(f"""[Unit]
+Description=Kudex protected configuration backup
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/python3 {app} --backup-auto
+""")
+    schedule = "*-*-* 00,12:00:00" if hours == 12 else "*-*-* 02:00:00"
+    timer.write_text(f"""[Unit]
+Description=Run Kudex backups every {hours} hours
+
+[Timer]
+OnCalendar={schedule}
+Persistent=true
+Unit=kudex-backup.service
+
+[Install]
+WantedBy=timers.target
+""")
+    os.chmod(service, 0o644)
+    os.chmod(timer, 0o644)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", "--now", "kudex-backup.timer"])
+    print(f"Automatic Kudex backups enabled every {hours} hours.")
+
+def backup_menu():
+    while True:
+        timer_state = service_state("kudex-backup.timer")
+        print("\n--- BACKUP MANAGER ---")
+        print("[1] Create manual backup")
+        print("[2] Automatic backup every 12 hours")
+        print("[3] Automatic backup every 24 hours")
+        print("[4] Disable automatic backups")
+        print("[5] List available backups")
+        print(f"Automatic schedule: {timer_state}")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            backup()
+        elif choice == "2":
+            install_backup_schedule(12)
+        elif choice == "3":
+            install_backup_schedule(24)
+        elif choice == "4":
+            if confirm("Disable automatic Kudex backups?"):
+                subprocess.run(["systemctl", "disable", "--now", "kudex-backup.timer"], check=False)
+                print("Automatic backups disabled.")
+        elif choice == "5":
+            archives = sorted(BACKUPS.glob("kudex-*.tar.gz"), reverse=True)
+            if not archives:
+                print("No backups found.")
+            for item in archives:
+                print(f"{item.name} ({human_bytes(item.stat().st_size)})")
+        else:
+            print("Invalid selection.")
+
 def restore_backup():
     ensure_dirs()
     archives = sorted(BACKUPS.glob("kudex-*.tar.gz"), reverse=True)
@@ -907,6 +976,7 @@ def main():
             return
         if sys.argv[1] == "update": update_app(); return
         if sys.argv[1] == "upgrade": upgrade_system(); return
+        if sys.argv[1] == "--backup-auto": backup(); return
     expire_due_accounts()
     while True:
         expire_due_accounts()
@@ -918,7 +988,7 @@ def main():
             elif choice in ("3","03"): protocol_menu("vless")
             elif choice in ("4","04"): protocol_menu("trojan")
             elif choice in ("5","05"): protocol_menu("sshws")
-            elif choice in ("6","06"): backup()
+            elif choice in ("6","06"): backup_menu()
             elif choice in ("7","07"): configure_domain()
             elif choice in ("8","08"): diagnostics()
             elif choice in ("9","09"):
