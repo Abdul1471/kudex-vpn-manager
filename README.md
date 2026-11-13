@@ -88,6 +88,12 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
 
 The main screen shows live hostname, detected server interface IP, domain/TLS configuration, OS, local time, uptime, CPU and RAM readings, enabled VPN client counts, and actual systemd service states. Live traffic is read from `/proc/net/dev`. Historical daily/monthly totals are shown when optional `vnstat` is installed; Kudex does not invent historical totals when it is absent. Service states distinguish running, stopped, not installed, and waiting for TLS. The restart-all action intentionally excludes OpenSSH to reduce the risk of disconnecting a remote administrator.
 
+## Trial, timed accounts and expiry
+
+SSH, VMess, VLESS and Trojan account creation now asks for a validity period in days. Enter **1** for a one-day trial, a number from 1 to 36500 for a timed account, or **0** for an account without an expiry date. Xray clients carry an ISO-8601 expiry timestamp in the protected Kudex client database; expired clients are disabled and removed from the generated active Xray configuration when expiry enforcement runs. Kudex checks expiry while the dashboard and account menus are open. SSH accounts receive a Linux account-expiry date with `chage`; Kudex-managed SSH accounts are also tracked in `/etc/kudex/ssh-accounts.json`.
+
+Use each protocol menu's **Renew account** option or SSH menu's **Renew account** option to extend validity and re-enable an account. An expired account cannot be manually unlocked without renewal. Existing accounts created before this feature have no recorded expiry and remain unchanged. Expiry is enforced by Kudex while its menu is running; SSH account expiry is additionally enforced by the operating system. A dedicated background expiry timer is not yet installed.
+
 ## Network layout
 
 Xray listens on loopback only:
