@@ -1303,13 +1303,18 @@ def configure_stunnel():
     print("Stunnel4 is active on TCP/444 and forwards TLS traffic to OpenSSH on 127.0.0.1:22.")
     print("Allow TCP/444 in your cloud firewall/security group if you intend to use this listener.")
 
+def openvpn_vars_config():
+    """Easy-RSA vars file with actual newlines."""
+    return "set_var EASYRSA_ALGO ec\nset_var EASYRSA_CURVE prime256v1\nset_var EASYRSA_DIGEST sha256\n"
+
+
 def openvpn_units():
     p = subprocess.run(["systemctl", "list-unit-files", "--type=service", "--no-legend"],
                        text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     available = []
     for line in p.stdout.splitlines():
         unit = line.split()[0] if line.split() else ""
-        if unit in ("openvpn.service", "openvpn@server.service", "openvpn-server@server.service"):
+        if unit in ("openvpn.service", "openvpn@server.service", "openvpn-server@server.service", "openvpn-server@kudex.service"):
             available.append(unit)
     return available
 
@@ -2818,7 +2823,7 @@ def openvpn_provision():
     easyrsa = shutil.which("easyrsa") or "/usr/share/easy-rsa/easyrsa"
     if not pathlib.Path(easyrsa).exists(): raise RuntimeError("Easy-RSA executable not found.")
     OPENVPN_EASYRSA.mkdir(mode=0o700, parents=True, exist_ok=True); shutil.copy2(easyrsa, OPENVPN_EASYRSA / "easyrsa")
-    (OPENVPN_EASYRSA / "vars").write_text("set_var EASYRSA_ALGO ec\\nset_var EASYRSA_CURVE prime256v1\\nset_var EASYRSA_DIGEST sha256\\n")
+    (OPENVPN_EASYRSA / "vars").write_text(openvpn_vars_config())
     os.chmod(OPENVPN_EASYRSA / "vars", 0o600)
     openvpn_easyrsa("init-pki"); openvpn_easyrsa("build-ca", "nopass"); openvpn_easyrsa("build-server-full", "server", "nopass")
     pki = OPENVPN_EASYRSA / "pki"
@@ -2894,7 +2899,7 @@ verb 3
 
 def openvpn_menu():
     while True:
-        print(f"\\n--- OPENVPN PROVISIONING ---\\nServer: {service_state(OPENVPN_UNIT)} | UDP/2200")
+        print(f"\n--- OPENVPN PROVISIONING ---\nServer: {service_state(OPENVPN_UNIT)} | UDP/2200")
         print("[1] Provision server [2] Create client profile [3] List client profiles [4] Restart [5] Stop [0] Back")
         x=input("Select: ").strip()
         if x=="0": return
@@ -2974,6 +2979,11 @@ def google_drive_menu():
             if GOOGLE_DRIVE_CONFIG.exists() and confirm("Disable automatic Drive copies? Existing cloud backups are preserved."): GOOGLE_DRIVE_CONFIG.unlink()
         else: print("Invalid selection.")
 
+def fail2ban_jail_config(ignore):
+    """Return a valid Fail2ban jail file with real line breaks."""
+    return "[sshd]\nenabled = true\nbackend = systemd\nport = ssh\nmaxretry = 3\nfindtime = 10m\nbantime = 1h\nignoreip = " + " ".join(ignore) + "\n"
+
+
 def install_fail2ban_protection():
     require_root()
     if not confirm("Enable Fail2ban SSH protection: ban source IP after 3 failures in 10 minutes for 1 hour? This is not per-account locking."): return
@@ -2986,7 +2996,7 @@ def install_fail2ban_protection():
     path=pathlib.Path("/etc/fail2ban/jail.d/kudex-sshd.local"); path.parent.mkdir(parents=True,exist_ok=True)
     if path.exists():
         stamp=datetime.datetime.now().strftime("%Y%m%d-%H%M%S"); shutil.copy2(path,path.with_name(path.name+".backup-"+stamp))
-    path.write_text("[sshd]\\nenabled = true\\nbackend = systemd\\nport = ssh\\nmaxretry = 3\\nfindtime = 10m\\nbantime = 1h\\nignoreip = "+" ".join(ignore)+"\\n")
+    path.write_text("[sshd]\nenabled = true\nbackend = systemd\nport = ssh\nmaxretry = 3\nfindtime = 10m\nbantime = 1h\nignoreip = "+" ".join(ignore)+"\n")
     os.chmod(path,0o644); run(["systemctl","enable","--now","fail2ban.service"]); run(["fail2ban-client","reload"])
     print("Fail2ban SSH jail active: 3 failures / 10 minutes / 1-hour source-IP ban.")
     print("This is brute-force protection, not general DDoS mitigation or account-based three-strike locking.")
