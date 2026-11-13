@@ -53,15 +53,20 @@ You can also choose [13] UPDATE KUDEX APPLICATION or [14] UPGRADE UBUNTU/DEBIAN 
 
 Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does not change OpenSSH port or rewrite sshd_config. Existing Dropbear defaults are backed up before setting port 2222 and disabling Dropbear root login.
 
-## First-time setup
+## First-time setup and cloud licensing
 
-1. Keep your existing SSH session open.
-2. Allow provider firewall TCP ports 80 and 443; allow 2222 only if Dropbear is needed.
-3. Choose [10] Install/Update Xray. The app downloads pinned official Xray-core v26.10.31 and verifies the archive against its accompanying SHA-256 digest.
-4. During installation, Kudex asks for your main domain (for example, example.com), then asks for a subdomain (for example, vpn). Entering `vpn` configures `vpn.example.com`; leave the subdomain blank to use the main domain directly. The selected hostname's A/AAAA record must point to this server. Leave the main domain blank to skip and configure it later from [07] DOMAIN & SSL. If a hostname is entered, Kudex offers to request a Let's Encrypt certificate for that complete hostname without an email address. Certbot uses HTTP-01; public TCP/80 and 443 must be reachable. Kudex enables TLS only after verifying that the certificate and private-key files exist.
-5. Choose [11] APPLY CONFIG to validate and start Xray. Nginx config is tested before reload.
-6. Add VMess, VLESS or Trojan accounts using menus [02], [03], [04]. Share URIs are shown only after TLS is ready.
-7. For SSH over WebSocket, create a normal SSH account in menu [01], then enable SSH-WS in menu [05]. WebSocket path /ssh forwards to OpenSSH; SSH authentication remains enabled.
+1. Before installation, register the VPS public IP through the KudexTech licensing service's `/trialip` endpoint for a 24-hour trial, or have an administrator assign a 30-day or Lifetime license to that IP. The trial can be registered only once per IP.
+2. Keep your existing SSH session open. Run the installer from the repository root:
+   `sudo bash install.sh`
+3. The installer bootstraps only `curl` and CA certificates, then sends a POST request to `https://kudex-license-api.yabdulqudus1471.workers.dev/api/authenticate`. Cloudflare supplies the caller IP to the API. If the IP is not licensed, the API is unreachable, or the response is invalid, installation stops before domain prompts and before VPN services are installed.
+4. After successful authentication, the interactive installer asks for the **Pointed Domain** (for example, `vpn.example.com`) and **NameServer** (for example, `ns.vpn.example.com`). Both must be full DNS hostnames. The pointed hostname's A/AAAA record must point to this VPS. Kudex records the nameserver value in its local state; it does not change Cloudflare DNS records or delegate authoritative DNS automatically.
+5. Allow provider firewall TCP ports 80 and 443; allow 2222 only if Dropbear is needed. Choose whether to install official Xray-core. The app downloads pinned official Xray-core v26.10.31 and verifies the archive against its accompanying SHA-256 digest.
+6. Kudex offers to request a Let's Encrypt certificate for the pointed domain without an email address. Certbot uses HTTP-01; public TCP/80 and 443 must be reachable. Kudex enables TLS only after verifying that the certificate and private-key files exist.
+7. Choose [11] APPLY CONFIG to validate and start Xray. Nginx config is tested before reload.
+8. Add VMess, VLESS or Trojan accounts using menus [02], [03], [04]. Share URIs are shown only after TLS is ready.
+9. For SSH over WebSocket, create a normal SSH account in menu [01], then enable SSH-WS in menu [05]. WebSocket path /ssh forwards to OpenSSH; SSH authentication remains enabled.
+
+The license API currently authenticates by the public IP observed by Cloudflare. It does not yet issue signed offline entitlements; an active network connection to the API is required for installation-time authentication.
 
 ## Menu
 
