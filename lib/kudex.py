@@ -1384,6 +1384,189 @@ def squid_proxy_menu():
         else:
             print("Invalid selection.")
 
+DANTE_CONFIG = pathlib.Path("/etc/danted.conf")
+DANTE_PAM = pathlib.Path("/etc/pam.d/sockd")
+DANTE_GROUP = "kudex-socks"
+DANTE_PORT = 1080
+
+def dante_config(interface):
+    return f"""# Managed by Kudex VPN Manager
+logoutput: syslog
+internal: 0.0.0.0 port = {DANTE_PORT}
+external: {interface}
+user.privileged: root
+user.notprivileged: nobody
+socksmethod: pam.username
+client pass {{
+    from: 0/0 to: 0/0
+}}
+socks pass {{
+    from: 0/0 to: 0/0
+    pam.servicename: sockd
+}}
+"""
+
+def dante_pam_config():
+    return """# Managed by Kudex VPN Manager: only dedicated Kudex SOCKS users may authenticate.
+auth required pam_succeed_if.so user ingroup kudex-socks
+@include common-auth
+account required pam_succeed_if.so user ingroup kudex-socks
+@include common-account
+@include common-session
+"""
+
+def dante_external_interface():
+    ip = shutil.which("ip")
+    if not ip:
+        raise RuntimeError("The iproute2 'ip' command is required to detect the outbound interface.")
+    result = subprocess.run([ip, "route", "get", "1.1.1.1"], text=True,
+                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    match = re.search(r"\bdev\s+([A-Za-z0-9_.:-]+)", result.stdout)
+    if result.returncode or not match:
+        raise RuntimeError("Could not determine the default outbound network interface.")
+    return match.group(1)
+
+def dante_installed():
+    return bool(shutil.which("sockd") and shutil.which("useradd") and shutil.which("chpasswd"))
+
+def dante_pam_supported():
+    binary = shutil.which("sockd")
+    if not binary:
+        return False
+    result = subprocess.run([binary, "-vv"], text=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT)
+    output = result.stdout.lower()
+    return "pam:" in output and "enabled" in output
+
+def dante_configure():
+    require_root()
+    if not confirm("Install Dante SOCKS5 on TCP/1080 with PAM-authenticated dedicated users? SOCKS username/password authentication is not encrypted; use a trusted tunnel or TLS-protected network."):
+        return
+    run(["apt-get", "update"])
+    run(["apt-get", "install", "-y", "--no-install-recommends", "dante-server", "libpam-modules"])
+    if not dante_installed() or not dante_pam_supported():
+        raise RuntimeError("Installed Dante binary does not report PAM support; refusing to expose an unauthenticated SOCKS service.")
+    interface = dante_external_interface()
+    if service_state("danted.service") != "active":
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("0.0.0.0", DANTE_PORT))
+            except OSError as exc:
+                raise RuntimeError(f"TCP/{DANTE_PORT} is already in use; resolve the port conflict before enabling Dante.") from exc
+    run(["getent", "group", DANTE_GROUP], check=False)
+    group = subprocess.run(["getent", "group", DANTE_GROUP], text=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if group.returncode:
+        run(["groupadd", "--system", DANTE_GROUP])
+    ETC.mkdir(parents=True, exist_ok=True)
+    backups = []
+    for path in (DANTE_CONFIG, DANTE_PAM):
+        if path.exists():
+            stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup = path.with_name(path.name + ".kudex-backup-" + stamp)
+            shutil.copy2(path, backup)
+            backups.append((path, backup))
+    DANTE_CONFIG.write_text(dante_config(interface))
+    os.chmod(DANTE_CONFIG, 0o640)
+    DANTE_PAM.write_text(dante_pam_config())
+    os.chmod(DANTE_PAM, 0o644)
+    try:
+        run(["systemctl", "enable", "--now", "danted.service"])
+        run(["systemctl", "restart", "danted.service"])
+        if service_state("danted.service") != "active":
+            raise RuntimeError("Dante did not become active after configuration.")
+    except Exception:
+        for path in (DANTE_CONFIG, DANTE_PAM):
+            backup = next((b for pth, b in backups if pth == path), None)
+            if backup:
+                shutil.copy2(backup, path)
+            else:
+                path.unlink(missing_ok=True)
+        run(["systemctl", "restart", "danted.service"], check=False)
+        raise
+    print(f"Authenticated Dante SOCKS5 is active on TCP/{DANTE_PORT} via {interface}. Create a Kudex SOCKS user before connecting.")
+
+def dante_add_user():
+    require_root()
+    if service_state("danted.service") != "active" or not DANTE_CONFIG.exists():
+        print("Configure Dante first.")
+        return
+    username = ask("SOCKS username (must start with kpx_)")
+    if not re.fullmatch(r"kpx_[A-Za-z0-9_.-]{3,24}", username):
+        raise RuntimeError("Use a dedicated username beginning kpx_ followed by 3–24 letters, digits, dots, underscores or hyphens.")
+    password = getpass.getpass("SOCKS password (minimum 16 characters): ")
+    if len(password) < 16 or "\n" in password or "\r" in password or ":" in password:
+        raise RuntimeError("Use at least 16 characters without line breaks or colons.")
+    entry = subprocess.run(["getent", "passwd", username], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if entry.returncode:
+        run(["useradd", "--no-create-home", "--shell", "/usr/sbin/nologin",
+             "--gid", DANTE_GROUP, username])
+    else:
+        groups = subprocess.run(["id", "-nG", username], text=True, stdout=subprocess.PIPE, check=True)
+        if DANTE_GROUP not in groups.stdout.split():
+            raise RuntimeError("That Linux username already exists and is not a Kudex SOCKS account; choose another username.")
+    run(["chpasswd"], input_text=f"{username}:{password}")
+    print(f"SOCKS account '{username}' is ready. SOCKS5 username/password is not encrypted in transit; use a protected tunnel.")
+
+def dante_list_users():
+    group = subprocess.run(["getent", "group", DANTE_GROUP], text=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if group.returncode:
+        print("No Kudex SOCKS users configured.")
+        return
+    members = group.stdout.rstrip().split(":")[-1].split(",")
+    members = sorted(x for x in members if x.startswith("kpx_"))
+    print("\nKudex SOCKS users:")
+    for username in members:
+        print(" - " + username)
+    if not members:
+        print("No Kudex SOCKS users configured.")
+
+def dante_lock_user(lock=True):
+    require_root()
+    username = ask("SOCKS username to " + ("lock" if lock else "unlock"))
+    if not re.fullmatch(r"kpx_[A-Za-z0-9_.-]{3,24}", username):
+        raise RuntimeError("Invalid Kudex SOCKS username.")
+    groups = subprocess.run(["id", "-nG", username], text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    if groups.returncode or DANTE_GROUP not in groups.stdout.split():
+        raise RuntimeError("That is not a Kudex SOCKS account.")
+    run(["usermod", "-L" if lock else "-U", username])
+    print(f"SOCKS account '{username}' {'locked' if lock else 'unlocked'}.")
+
+def dante_socks_menu():
+    while True:
+        print("\n--- DANTE SOCKS5 MANAGER ---")
+        print(f"Dante service: {service_state('danted.service')} | TCP/{DANTE_PORT}")
+        print("[1] Install/configure authenticated SOCKS5")
+        print("[2] Add/reset SOCKS username and password")
+        print("[3] List Kudex SOCKS users")
+        print("[4] Lock SOCKS user")
+        print("[5] Unlock SOCKS user")
+        print("[6] Restart Dante")
+        print("[7] Stop Dante")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            dante_configure()
+        elif choice == "2":
+            dante_add_user()
+        elif choice == "3":
+            dante_list_users()
+        elif choice == "4":
+            dante_lock_user(True)
+        elif choice == "5":
+            dante_lock_user(False)
+        elif choice == "6":
+            if confirm("Restart Dante and disconnect active SOCKS sessions?"):
+                run(["systemctl", "restart", "danted.service"])
+        elif choice == "7":
+            if confirm("Stop the SOCKS5 proxy?"):
+                run(["systemctl", "stop", "danted.service"])
+        else:
+            print("Invalid selection.")
+
 def optional_services_menu():
     while True:
         print("\n--- STUNNEL4 & OPENVPN ---")
@@ -2185,7 +2368,7 @@ def server_ip():
 def service_summary():
     checks = (("SSH", ("ssh.service", "sshd.service")), ("NGINX", ("nginx.service",)),
               ("XRAY", ("xray.service",)), ("DROPBEAR", ("dropbear.service",)),
-              ("STUNNEL4", ("stunnel4.service",)), ("SLOWDNS", ("kudex-dnstt.service",)))
+              ("STUNNEL4", ("stunnel4.service",)), ("SLOWDNS", ("kudex-dnstt.service",)), ("SOCKS5", ("danted.service",)))
     result = {}
     for label, units in checks:
         states = [service_state(u) for u in units]
@@ -2249,6 +2432,7 @@ def dashboard():
     print(" [21] SSH Banner Editor    [22] Auto-Reboot Scheduler")
     print(" [23] Server Speed Test      [24] Xray Transport Manager")
     print(" [25] Authenticated HTTP Proxy")
+    print(" [26] Dante SOCKS5 Proxy")
     print(" [00] Exit")
     print(cyan+"─"*64+reset)
 
@@ -2511,6 +2695,7 @@ def main():
             elif choice == "23": speed_test_menu()
             elif choice == "24": transport_manager_menu()
             elif choice == "25": squid_proxy_menu()
+            elif choice == "26": dante_socks_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
