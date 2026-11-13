@@ -580,6 +580,111 @@ def ssh_menu():
         else:
             print("Invalid selection.")
 
+
+def stunnel_config_text(pem_path):
+    return f"""foreground = no
+pid = /run/stunnel4/kudex.pid
+output = /var/log/stunnel4/kudex.log
+debug = 4
+
+[ssh]
+accept = 0.0.0.0:444
+connect = 127.0.0.1:22
+cert = {pem_path}
+TIMEOUTclose = 0
+"""
+
+def configure_stunnel():
+    require_root()
+    st = state()
+    domain = st.get("domain", "")
+    if not st.get("tls") or not valid_domain(domain):
+        raise RuntimeError("Configure DOMAIN & SSL and issue a valid certificate before enabling Stunnel.")
+    cert_dir = pathlib.Path("/etc/letsencrypt/live") / domain
+    fullchain = cert_dir / "fullchain.pem"
+    private_key = cert_dir / "privkey.pem"
+    if not fullchain.exists() or not private_key.exists():
+        raise RuntimeError("Let's Encrypt certificate files are missing.")
+    if not shutil.which("stunnel4"):
+        if not confirm("Install Stunnel4 from Ubuntu/Debian repositories?"):
+            return
+        run(["apt-get", "update"])
+        run(["apt-get", "install", "-y", "stunnel4"])
+    config_dir = pathlib.Path("/etc/stunnel")
+    config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    pem = config_dir / "kudex.pem"
+    pem.write_bytes(fullchain.read_bytes() + b"\n" + private_key.read_bytes())
+    os.chmod(pem, 0o600)
+    config = config_dir / "kudex.conf"
+    config.write_text(stunnel_config_text(str(pem)))
+    os.chmod(config, 0o600)
+    defaults = pathlib.Path("/etc/default/stunnel4")
+    current = defaults.read_text() if defaults.exists() else ""
+    def set_default(text, key, value):
+        pattern = rf"(?m)^\s*{re.escape(key)}=.*$"
+        line = f'{key}="{value}"'
+        return re.sub(pattern, line, text) if re.search(pattern, text) else text.rstrip() + "\n" + line + "\n"
+    current = set_default(current, "ENABLED", "1")
+    current = set_default(current, "FILES", "/etc/stunnel/kudex.conf")
+    defaults.write_text(current)
+    os.chmod(defaults, 0o644)
+    run(["systemctl", "daemon-reload"])
+    run(["systemctl", "enable", "--now", "stunnel4.service"])
+    if service_state("stunnel4.service") != "active":
+        raise RuntimeError("Stunnel configuration was written but the service is not active. Check journalctl -u stunnel4.")
+    print("Stunnel4 is active on TCP/444 and forwards TLS traffic to OpenSSH on 127.0.0.1:22.")
+    print("Allow TCP/444 in your cloud firewall/security group if you intend to use this listener.")
+
+def openvpn_units():
+    p = subprocess.run(["systemctl", "list-unit-files", "--type=service", "--no-legend"],
+                       text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    available = []
+    for line in p.stdout.splitlines():
+        unit = line.split()[0] if line.split() else ""
+        if unit in ("openvpn.service", "openvpn@server.service", "openvpn-server@server.service"):
+            available.append(unit)
+    return available
+
+def optional_services_menu():
+    while True:
+        print("\n--- STUNNEL4 & OPENVPN ---")
+        print(f"[1] Configure/enable Stunnel4 TLS on TCP/444 ({service_state('stunnel4.service')})")
+        print(f"[2] Restart Stunnel4 ({service_state('stunnel4.service')})")
+        print("[3] OpenVPN service controls")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            configure_stunnel()
+        elif choice == "2":
+            if service_state("stunnel4.service") == "active":
+                run(["systemctl", "restart", "stunnel4.service"])
+            else:
+                print("Stunnel4 is not active; configure it first.")
+        elif choice == "3":
+            units = openvpn_units()
+            if not units:
+                print("No OpenVPN systemd service is installed. Kudex will not create or overwrite an OpenVPN server configuration.")
+                continue
+            for index, unit in enumerate(units, 1):
+                print(f"[{index}] {unit}: {service_state(unit)}")
+            selected = ask("Select service number")
+            if not selected.isdigit() or not (1 <= int(selected) <= len(units)):
+                print("Invalid selection.")
+                continue
+            unit = units[int(selected) - 1]
+            print(f"{unit}: {service_state(unit)}")
+            print("[1] Start [2] Stop [3] Restart [4] Enable at boot [5] Disable at boot [0] Back")
+            action = input("Select: ").strip()
+            actions = {"1": "start", "2": "stop", "3": "restart", "4": "enable", "5": "disable"}
+            if action in actions:
+                if action in ("2", "3") and not confirm(f"{action} may disconnect OpenVPN clients. Continue?"):
+                    continue
+                run(["systemctl", actions[action], unit])
+        else:
+            print("Invalid selection.")
+
 def service_menu(label, unit):
     while True:
         print(f"\n{label}: {service_state(unit)}")
@@ -1050,6 +1155,7 @@ def main():
             elif choice == "15": bandwidth_menu()
             elif choice == "16": restart_services()
             elif choice == "17": ports_info()
+            elif choice == "18": optional_services_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
