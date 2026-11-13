@@ -2968,7 +2968,9 @@ def current_login_identity():
                 tty = os.ttyname(sys.stdin.fileno())
         except (OSError, ValueError):
             tty = ""
-    return session_id, pathlib.Path(tty).name if tty else ""
+    parts = pathlib.Path(tty).parts if tty else ()
+    terminal = "/".join(parts[-2:]) if len(parts) >= 2 and parts[-2] == "pts" else (parts[-1] if parts else "")
+    return session_id, terminal
 
 
 def loginctl_session(session_id):
@@ -2988,7 +2990,7 @@ def loginctl_session(session_id):
     return {
         "id": str(session_id), "uid": values.get("User", ""),
         "user": values.get("Name", ""),
-        "tty": pathlib.Path(values.get("TTY", "")).name if values.get("TTY") else "",
+        "tty": ("/".join(pathlib.Path(values["TTY"]).parts[-2:]) if len(pathlib.Path(values["TTY"]).parts) >= 2 and pathlib.Path(values["TTY"]).parts[-2] == "pts" else pathlib.Path(values["TTY"]).name) if values.get("TTY") else "",
         "remote": values.get("Remote", "no").lower() == "yes",
         "remote_host": values.get("RemoteHost", ""), "state": values.get("State", "unknown"),
     }
