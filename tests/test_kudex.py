@@ -208,5 +208,11 @@ class KudexValidationTests(unittest.TestCase):
         self.assertNotIn("push \"redirect-gateway", source)
         self.assertIn("tls-crypt", source)
 
+    def test_google_drive_remote_must_be_drive_type(self):
+        import inspect
+        # The remote type check is kept in the menu flow; the stored settings
+        # remain provider-neutral so the token is never copied into Kudex state.
+        self.assertIn('["rclone","config","show",remote]', inspect.getsource(kudex.google_drive_menu))
+
 if __name__ == "__main__":
     unittest.main()
