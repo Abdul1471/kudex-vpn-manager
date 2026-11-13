@@ -249,8 +249,6 @@ class KudexSessionSafetyTests(unittest.TestCase):
         row = {"id": "8", "user": "alice", "tty": "pts/3", "remote": True}
         self.assertTrue(kudex.session_termination_allowed(row, "7", "pts/2"))
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class KudexConnectionGuardTests(unittest.TestCase):
@@ -279,3 +277,6 @@ class KudexConnectionGuardTests(unittest.TestCase):
     def test_guard_settings_reject_invalid_allowlist(self):
         with mock.patch.object(kudex, "read_json", return_value={"threshold": 150, "ban_minutes": 10, "allowlist": ["not-an-ip"]}):
             self.assertIsNone(kudex.ddos_guard_settings())
+
+if __name__ == "__main__":
+    unittest.main()
