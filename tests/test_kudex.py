@@ -251,3 +251,31 @@ class KudexSessionSafetyTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class KudexConnectionGuardTests(unittest.TestCase):
+    def test_guard_exempts_private_and_loopback_addresses(self):
+        self.assertTrue(kudex.guard_ip_exempt("10.1.2.3", []))
+        self.assertTrue(kudex.guard_ip_exempt("127.0.0.1", []))
+        self.assertTrue(kudex.guard_ip_exempt("::1", []))
+
+    def test_guard_exempts_explicit_admin_network(self):
+        self.assertTrue(kudex.guard_ip_exempt("203.0.113.7", ["203.0.113.0/24"]))
+
+    def test_guard_does_not_exempt_unlisted_public_address(self):
+        self.assertFalse(kudex.guard_ip_exempt("8.8.8.8", []))
+
+    def test_ss_peer_parser_handles_ipv4_and_ipv6(self):
+        self.assertEqual(kudex.parse_ss_peer_address("198.51.100.4:54321"), "198.51.100.4")
+        self.assertEqual(kudex.parse_ss_peer_address("[2001:4860:4860::8888]:443"), "2001:4860:4860::8888")
+        self.assertIsNone(kudex.parse_ss_peer_address("invalid"))
+
+    def test_guard_settings_validate_threshold_and_allowlist(self):
+        with mock.patch.object(kudex, "read_json", return_value={"threshold": 150, "ban_minutes": 10, "allowlist": ["203.0.113.5/32"]}):
+            self.assertEqual(kudex.ddos_guard_settings()["threshold"], 150)
+        with mock.patch.object(kudex, "read_json", return_value={"threshold": 5, "ban_minutes": 10, "allowlist": []}):
+            self.assertIsNone(kudex.ddos_guard_settings())
+
+    def test_guard_settings_reject_invalid_allowlist(self):
+        with mock.patch.object(kudex, "read_json", return_value={"threshold": 150, "ban_minutes": 10, "allowlist": ["not-an-ip"]}):
+            self.assertIsNone(kudex.ddos_guard_settings())
