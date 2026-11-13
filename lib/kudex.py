@@ -276,6 +276,46 @@ def apply_nginx():
     run(["systemctl", "reload", "nginx"])
     print("Nginx configuration validated and reloaded.")
 
+def domain_ssl_menu():
+    while True:
+        st = state()
+        domain = st.get("domain") or "NOT CONFIGURED"
+        print("\n--- DOMAIN & SSL MANAGER ---")
+        print(f"Current domain: {domain}")
+        print(f"TLS status: {'ENABLED' if st.get('tls') else 'NOT CONFIGURED'}")
+        print("[1] Add/change domain and SSL")
+        print("[2] Force-renew current Let's Encrypt certificate")
+        print("[3] Show certificate details")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            configure_domain()
+        elif choice == "2":
+            domain = state().get("domain", "")
+            if not valid_domain(domain) or not state().get("tls"):
+                print("Configure a domain and issue its certificate first.")
+                continue
+            if not shutil.which("certbot"):
+                print("Certbot is not installed.")
+                continue
+            if confirm(f"Force-renew the Let's Encrypt certificate for {domain}?"):
+                run(["certbot", "renew", "--cert-name", domain, "--force-renewal"])
+                if pathlib.Path(f"/etc/letsencrypt/live/{domain}/fullchain.pem").exists():
+                    apply_nginx()
+                    if service_state("stunnel4.service") == "active":
+                        run(["systemctl", "restart", "stunnel4.service"])
+                    print("Certificate renewal command completed.")
+        elif choice == "3":
+            domain = state().get("domain", "")
+            if not valid_domain(domain):
+                print("No valid domain is configured.")
+                continue
+            run(["certbot", "certificates"], check=False)
+        else:
+            print("Invalid selection.")
+
 def configure_domain():
     require_root()
     st = state()
@@ -1147,7 +1187,7 @@ def main():
             elif choice in ("4","04"): protocol_menu("trojan")
             elif choice in ("5","05"): protocol_menu("sshws")
             elif choice in ("6","06"): backup_menu()
-            elif choice in ("7","07"): configure_domain()
+            elif choice in ("7","07"): domain_ssl_menu()
             elif choice in ("8","08"): diagnostics()
             elif choice in ("9","09"):
                 units = (("SSH","ssh.service"),("NGINX","nginx.service"),("XRAY","xray.service"),("DROPBEAR","dropbear.service"))
