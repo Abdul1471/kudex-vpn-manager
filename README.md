@@ -82,7 +82,7 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
     [15] BANDWIDTH MONITOR (live; daily/monthly via optional vnStat)
     [16] RESTART MANAGED SERVICES (SSH deliberately excluded)
     [17] PORTS & SERVER INFO
-    [18] STUNNEL4 & OPENVPN\n    [19] SSH SECURITY MANAGER
+    [18] STUNNEL4 & OPENVPN\n    [19] SSH SECURITY MANAGER\n    [20] SLOWDNS / DNSTT\n    [21] SSH BANNER EDITOR\n    [22] AUTO-REBOOT SCHEDULER\n    [23] SERVER SPEED TEST\n    [24] XRAY TRANSPORT MANAGER
     [00] EXIT SYSTEM
 
 ## Terminal dashboard and monitoring
@@ -114,6 +114,38 @@ Xray listens on loopback only:
 - SSH-WS: 127.0.0.1:10004, path /ssh, forwards to 127.0.0.1:22
 
 Nginx terminates TLS on TCP/443 and proxies WebSocket paths to Xray. Xray inbounds are not exposed directly on the public interface.
+
+## Xray transport manager: HTTPUpgrade and VLESS REALITY
+
+Menu **[24] Xray Transport Manager** adds optional HTTPUpgrade listeners for
+VMess, VLESS, and Trojan, plus a separate VLESS REALITY + Vision listener.
+These transports are opt-in; existing WebSocket accounts and listeners remain
+available.
+
+- HTTPUpgrade uses loopback-only Xray listeners on TCP/10005–10007 and distinct
+  paths `/vmess-hu`, `/vless-hu`, and `/trojan-hu`. When a domain and TLS
+  certificate are configured, Nginx terminates TLS on TCP/443 and proxies the
+  selected HTTPUpgrade paths. The app prints matching client links.
+- VLESS REALITY uses a direct Xray listener on TCP/8443 with
+  `xtls-rprx-vision`. Setup asks for a target host:port and serverName, creates
+  X25519 keys with the installed Xray binary, and stores the private key in
+  `/etc/kudex/reality.json` with root-only permissions. Client links include
+  the public key and short ID. Allow TCP/8443 in the cloud/provider firewall
+  only after setup.
+- REALITY sends unauthenticated handshakes to its configured target. Choose a
+  stable HTTPS origin you are authorized to use, understand the fallback
+  behavior, and avoid targets behind shared CDN proxies. REALITY is not
+  combined with WebSocket or HTTPUpgrade; Xray's supported combinations are
+  validated by the core when Kudex applies configuration.
+- HTTPUpgrade is designed to work with TLS and a reverse proxy; it is not
+  enabled by default. Disable/enable actions preserve existing account records.
+- REALITY settings are included in protected Kudex backups and restored only
+  from the recognized `/etc/kudex/reality.json` path.
+
+Xray must be installed before configuring these transports. After changing
+transport settings, Kudex validates the generated configuration with
+`xray run -test` before restarting the Xray service. Keep your current SSH
+session open while making remote service changes.
 
 ## Security notes
 
