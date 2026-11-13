@@ -374,6 +374,13 @@ def domain_ssl_menu():
         else:
             print("Invalid selection.")
 
+def certbot_issue_args(domain, webroot):
+    """Build a Let's Encrypt request without collecting or storing an email address."""
+    return ["certbot", "certonly", "--webroot", "-w", str(webroot), "-d", domain,
+            "--register-unsafely-without-email", "--agree-tos", "--non-interactive",
+            "--keep-until-expiring"]
+
+
 def configure_domain():
     require_root()
     st = state()
@@ -381,10 +388,9 @@ def configure_domain():
     if not valid_domain(domain):
         raise RuntimeError("Invalid domain name.")
     domain = domain.lower()
-    email = ask("Email address for Let's Encrypt notices", st.get("email", ""))
-    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
-        raise RuntimeError("A valid email address is required.")
-    st.update({"domain": domain, "email": email, "tls": False})
+    # Email registration is intentionally disabled; retain no email requirement.
+    st.update({"domain": domain, "tls": False})
+    st.pop("email", None)
     atomic_json(STATE, st)
     apply_nginx()
     if xray_binary():
@@ -394,24 +400,7 @@ def configure_domain():
         return
     if not confirm(f"Request a Let's Encrypt certificate for {domain}? Ensure DNS points here and TCP ports 80/443 are reachable."):
         return
-    run(["certbot", "certonly", "--webroot", "-w", str(WEBROOT), "-d", domain,
-         "--email", email, "--agree-tos", "--non-interactive", "--keep-until-expiring"])
-    st["tls"] = True
-    atomic_json(STATE, st)
-    apply_nginx()
-    if xray_binary():
-        apply_xray()
-    hook = pathlib.Path("/etc/letsencrypt/renewal-hooks/deploy/kudex-nginx-reload")
-    hook.parent.mkdir(parents=True, exist_ok=True)
-    hook.write_text("#!/bin/sh\nset -eu\nsystemctl reload nginx.service\n"
-                    "if [ -f /etc/stunnel/kudex.conf ]; then\n"
-                    "  cat /etc/letsencrypt/live/" + domain + "/fullchain.pem "
-                    "/etc/letsencrypt/live/" + domain + "/privkey.pem > /etc/stunnel/kudex.pem\n"
-                    "  chmod 600 /etc/stunnel/kudex.pem\n"
-                    "  systemctl restart stunnel4.service || true\n"
-                    "fi\n")
-    os.chmod(hook, 0o755)
-    print("TLS certificate issued. Certbot renewal timer will reload Nginx after renewal.")
+    run(certbot_issue_args(domain, WEBROOT))
 
 
 SSH_ACCOUNTS = ETC / "ssh-accounts.json"
