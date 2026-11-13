@@ -1180,6 +1180,8 @@ def download_telegram_backup(file_id, filename):
             raise RuntimeError("Downloaded Telegram document is not a valid tar archive.")
         os.chmod(temporary, 0o600)
         target = BACKUPS / filename
+        if target.exists():
+            raise RuntimeError("A local backup with this filename already exists; move it aside before downloading again.")
         os.replace(temporary, target)
     finally:
         if os.path.exists(temporary):
