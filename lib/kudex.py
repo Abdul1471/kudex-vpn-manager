@@ -1312,10 +1312,16 @@ def openvpn_units():
     p = subprocess.run(["systemctl", "list-unit-files", "--type=service", "--no-legend"],
                        text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     available = []
+    has_server_template = False
     for line in p.stdout.splitlines():
         unit = line.split()[0] if line.split() else ""
-        if unit in ("openvpn.service", "openvpn@server.service", "openvpn-server@server.service", "openvpn-server@kudex.service"):
+        if unit == "openvpn-server@.service":
+            has_server_template = True
+        elif unit in ("openvpn.service", "openvpn@server.service", "openvpn-server@server.service", "openvpn-server@kudex.service"):
             available.append(unit)
+    # Ubuntu/Debian ship an instance template; the Kudex instance is created at provisioning time.
+    if has_server_template and OPENVPN_UNIT not in available:
+        available.append(OPENVPN_UNIT)
     return available
 
 SQUID_CONFIG = pathlib.Path("/etc/squid/squid.conf")
