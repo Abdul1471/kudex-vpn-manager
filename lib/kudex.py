@@ -1326,6 +1326,99 @@ def speed_test_menu():
     else:
         run([tool, "--secure"])
 
+
+BACKUP_SYNC_CONFIG = ETC / "backup-sync.json"
+
+def configured_backup_mount():
+    config = read_json(BACKUP_SYNC_CONFIG, {})
+    raw = config.get("mount_path", "")
+    if not isinstance(raw, str) or not raw:
+        return None
+    mount = pathlib.Path(raw)
+    if not mount.is_absolute() or mount.resolve() == pathlib.Path("/"):
+        return None
+    if not mount.is_dir() or not os.path.ismount(str(mount)):
+        return None
+    return mount.resolve()
+
+def sync_backup_to_mount(archive):
+    require_root()
+    source = pathlib.Path(archive)
+    if source.parent.resolve() != BACKUPS.resolve() or not source.is_file() or source.is_symlink():
+        raise RuntimeError("Only a regular Kudex archive inside the local backup directory can be synced.")
+    if not re.fullmatch(r"kudex-[0-9]{8}-[0-9]{6}\.tar\.gz", source.name):
+        raise RuntimeError("Unrecognized Kudex backup filename.")
+    mount = configured_backup_mount()
+    if not mount:
+        raise RuntimeError("Configured backup mount is not currently mounted. Local backup remains safe.")
+    destination_dir = mount / "KudexBackups"
+    destination_dir.mkdir(mode=0o700, exist_ok=True)
+    if destination_dir.is_symlink() or destination_dir.resolve().parent != mount:
+        raise RuntimeError("Backup sync destination is not a safe directory on the configured mount.")
+    destination = destination_dir / source.name
+    fd, temporary = tempfile.mkstemp(prefix=".kudex-sync-", dir=str(destination_dir))
+    digest = hashlib.sha256()
+    try:
+        with os.fdopen(fd, "wb") as output, source.open("rb") as incoming:
+            while True:
+                chunk = incoming.read(1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+                output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, destination)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    checksum = destination.with_name(destination.name + ".sha256")
+    checksum.write_text(digest.hexdigest() + "  " + destination.name + "\n")
+    os.chmod(checksum, 0o600)
+    print("Backup synced to mounted storage: " + str(destination))
+    return destination
+
+def backup_sync_menu():
+    require_root()
+    while True:
+        mount = configured_backup_mount()
+        print("\n--- SMART BACKUP SYNC ---")
+        print("Configured mount: " + (str(mount) if mount else "NOT CONFIGURED / NOT MOUNTED"))
+        print("Destination folder: KudexBackups")
+        print("[1] Configure mounted backup destination")
+        print("[2] Sync latest local backup now")
+        print("[3] Disable mounted backup sync")
+        print("[0] Back")
+        choice = input("Select: ").strip()
+        if choice == "0":
+            return
+        if choice == "1":
+            raw = ask("Absolute path of an already-mounted backup disk or network share")
+            candidate = pathlib.Path(raw).expanduser()
+            if not candidate.is_absolute() or not candidate.is_dir() or not os.path.ismount(str(candidate)):
+                print("That path is not an active mount point. Mount the external disk/network share first.")
+                continue
+            candidate = candidate.resolve()
+            if candidate == pathlib.Path("/"):
+                print("The filesystem root cannot be used as a backup destination.")
+                continue
+            if confirm("Save this mounted destination for automatic backup copies: " + str(candidate) + "?"):
+                atomic_json(BACKUP_SYNC_CONFIG, {"mount_path": str(candidate)})
+                print("Mounted backup sync configured.")
+        elif choice == "2":
+            archives = sorted(BACKUPS.glob("kudex-*.tar.gz"), reverse=True)
+            if not archives:
+                print("No local Kudex backup exists yet.")
+            else:
+                sync_backup_to_mount(archives[0])
+        elif choice == "3":
+            if BACKUP_SYNC_CONFIG.exists() and confirm("Disable mounted backup sync? Existing copies on the mounted storage will be preserved."):
+                BACKUP_SYNC_CONFIG.unlink()
+                print("Mounted backup sync disabled.")
+        else:
+            print("Invalid selection.")
+
 def backup(auto_upload=False):
     ensure_dirs()
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1340,6 +1433,11 @@ def backup(auto_upload=False):
     print(f"Backup created: {target}")
     if backup_retention_count():
         prune_old_backups(silent=True)
+    if BACKUP_SYNC_CONFIG.exists():
+        try:
+            sync_backup_to_mount(target)
+        except RuntimeError as exc:
+            print(f"[BACKUP SYNC WARNING] {exc}")
     if auto_upload and telegram_settings():
         try:
             upload_telegram_backup(target)
@@ -1474,6 +1572,7 @@ def backup_menu():
         print("[8] Telegram backup integration")
         print("[9] Verify a backup archive")
         print("[10] Smart backup retention")
+        print("[11] Smart backup sync (mounted storage)")
         print(f"Backup schedule: {timer_state} | Expiry checks: {expiry_timer_state}")
         print("[0] Back")
         choice = input("Select: ").strip()
@@ -1507,6 +1606,8 @@ def backup_menu():
             verify_backups_menu()
         elif choice == "10":
             backup_retention_menu()
+        elif choice == "11":
+            backup_sync_menu()
         else:
             print("Invalid selection.")
 
