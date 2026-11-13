@@ -58,7 +58,7 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
 1. Keep your existing SSH session open.
 2. Allow provider firewall TCP ports 80 and 443; allow 2222 only if Dropbear is needed.
 3. Choose [10] Install/Update Xray. The app downloads pinned official Xray-core v26.10.31 and verifies the archive against its accompanying SHA-256 digest.
-4. Choose [07] DOMAIN & SSL. Enter a DNS name pointing to this server and a valid email. Certbot uses HTTP-01; public TCP/80 must be reachable.
+4. Choose [07] DOMAIN & SSL. Use the manager to add/change a DNS name pointing to this server, issue a certificate, force-renew the current certificate, or inspect Certbot certificate details. Enter a valid email when configuring the domain. Certbot uses HTTP-01; public TCP/80 must be reachable.
 5. Choose [11] APPLY CONFIG to validate and start Xray. Nginx config is tested before reload.
 6. Add VMess, VLESS or Trojan accounts using menus [02], [03], [04]. Share URIs are shown only after TLS is ready.
 7. For SSH over WebSocket, create a normal SSH account in menu [01], then enable SSH-WS in menu [05]. WebSocket path /ssh forwards to OpenSSH; SSH authentication remains enabled.
@@ -98,6 +98,8 @@ Use each protocol menu's **Renew account** option or SSH menu's **Renew account*
 ## Backup scheduling
 
 The Backup Manager supports manual backups and automatic systemd-timer schedules every 12 or 24 hours. Backups include the protected `/etc/kudex` data, Xray configuration and Kudex Nginx site when present. Automatic jobs run as root and store archives under `/var/backups/kudex`. Choose **Disable automatic backups** to stop the timer. The Backup Manager also offers an optional systemd expiry timer that checks timed Xray accounts every five minutes. The current local backup scheduler does not upload archives to Telegram or Google Drive; remote backup integrations are a separate future feature. Treat every archive as sensitive because it contains account credentials.
+
+The Domain & SSL menu supports certificate renewal on demand with Certbot's `--force-renewal` option. Use this only when needed; repeated forced renewals can consume Let's Encrypt rate limits. Normal automatic renewal remains managed by Certbot's system timer.
 
 ## Stunnel4 TLS and OpenVPN service controls
 
