@@ -225,3 +225,13 @@ Backup Manager → **[11] Smart backup sync** can mirror each new local Kudex ar
 ## Account expiry cleanup
 
 SSH Account Manager → **[8] Clean expired** lists only Kudex-managed SSH users whose recorded expiry has passed, then asks for confirmation before deleting their Linux accounts and home directories. It also removes their Kudex concurrency-limit entries. Existing SSH sessions can remain active until they disconnect. VMess, VLESS, and Trojan account menus include **[6] Clean expired**, which removes expired client records and reapplies the validated Xray configuration; if applying the new configuration fails, Kudex restores the previous client database.
+
+
+## Additional services and cloud backup
+
+- **BadVPN UDPGW** is managed from menu [27]. It uses TCP/7100–7300, defaults to loopback, and requires an explicit warning confirmation before binding publicly. UDPGW has no built-in client authentication; expose it only behind a trusted network or firewall.
+- **OpenVPN provisioning** is available in menu [28]. It creates a new Easy-RSA CA, a UDP/2200 server using certificate authentication and tls-crypt, and individual client profiles. The setup deliberately does not enable IP forwarding, NAT, modify firewall rules, or push a default route. Client profiles contain private keys and must be transferred securely.
+- **Google Drive backup** is available in menu [29] through rclone. Configure the Google Drive remote interactively as root, select its remote name, and choose a folder. Scheduled backups are copied when configured. rclone OAuth tokens remain in root's rclone config (outside the repository); protect that file and revoke access from Google's account security page if exposed.
+- **SSH brute-force protection** is available in menu [30] through Fail2ban. The default policy bans a source IP after three failed SSH attempts in ten minutes for one hour and allowlists the current SSH peer where detectable. This is not a per-account three-strike lock and is not a general DDoS mitigation system.
+
+OHP custom-header transport, cloud licensing, per-account failed-login lockout, and safe active-session termination are not advertised as implemented. OHP requires a verified compatible client/server implementation; licensing requires your real issuer API and policy; per-account lockout requires a validated PAM/auth-log integration. Kudex will not simulate those features or embed licensing secrets.
