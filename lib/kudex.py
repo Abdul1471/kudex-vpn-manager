@@ -381,13 +381,14 @@ def certbot_issue_args(domain, webroot):
             "--keep-until-expiring"]
 
 
-def configure_domain():
+def configure_domain(domain_input=None):
     require_root()
     st = state()
-    domain = ask("Domain name (A/AAAA record must point to this server)", st.get("domain", ""))
+    domain = domain_input if domain_input is not None else ask(
+        "Domain name (A/AAAA record must point to this server)", st.get("domain", ""))
+    domain = domain.strip().lower()
     if not valid_domain(domain):
         raise RuntimeError("Invalid domain name.")
-    domain = domain.lower()
     # Email registration is intentionally disabled; retain no email requirement.
     st.update({"domain": domain, "tls": False})
     st.pop("email", None)
@@ -399,8 +400,18 @@ def configure_domain():
         print("Certbot is not installed. Install it with: apt-get install certbot")
         return
     if not confirm(f"Request a Let's Encrypt certificate for {domain}? Ensure DNS points here and TCP ports 80/443 are reachable."):
+        print("Domain saved. You can request its certificate later from DOMAIN & SSL.")
         return
     run(certbot_issue_args(domain, WEBROOT))
+    fullchain = pathlib.Path(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
+    private_key = pathlib.Path(f"/etc/letsencrypt/live/{domain}/privkey.pem")
+    if not fullchain.is_file() or not private_key.is_file():
+        raise RuntimeError("Certbot finished without the expected certificate files; TLS remains disabled.")
+    st = state()
+    st["tls"] = True
+    atomic_json(STATE, st)
+    apply_nginx()
+    print(f"HTTPS is enabled for {domain}.")
 
 
 SSH_ACCOUNTS = ETC / "ssh-accounts.json"
@@ -3246,6 +3257,8 @@ def main():
     require_root(); ensure_dirs()
     if len(sys.argv) > 1:
         if sys.argv[1] == "--install-xray": install_xray(force="--yes" in sys.argv); return
+        if sys.argv[1] == "--configure-domain":
+            configure_domain(sys.argv[2] if len(sys.argv) > 2 else None); return
         if sys.argv[1] in ("--apply-config", "apply"):
             apply_xray()
             if state().get("domain"): apply_nginx()
