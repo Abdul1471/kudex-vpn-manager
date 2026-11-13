@@ -158,3 +158,11 @@ Menu [21] edits the SSH pre-login banner in /etc/issue.net and manages a dedicat
 Menu [22] can schedule or disable a daily VPS reboot using a systemd timer. Reboot scheduling is off by default and requires explicit confirmation. Reboots interrupt SSH, VPN tunnels, and all hosted workloads; choose a maintenance window in the server's local timezone.
 
 Service Control [09] now discovers installed OpenSSH, Nginx, Xray, Dropbear, Stunnel4, DNSTT, OpenVPN, Cron, Squid, and Apache services. SSH stop/restart actions retain a separate confirmation warning.
+
+## Telegram backup integration
+
+Open **Backup Manager → Telegram backup integration** to configure a Telegram bot token and destination chat ID, test delivery, upload the latest local archive, or remove the saved credentials. Bot tokens are entered with hidden terminal input and stored in `/etc/kudex/telegram.json` with mode `0600`; the containing `/etc/kudex` directory is root-only. Create a bot with Telegram's `@BotFather`, start a private chat with it (or add it to a channel where it can post), and supply the destination chat ID or channel username. The connection test sends a visible test message.
+
+When Telegram is configured, scheduled automatic backups also attempt to upload each new archive. A Telegram delivery failure does not delete or invalidate the local backup; the failure is written to the systemd service log. Manual backups remain local until you choose **Upload latest local backup**. Telegram credentials are deliberately excluded from Kudex backup archives and are not restored from them. Treat bot tokens as passwords; if a token was ever shared publicly or pasted into an untrusted template, revoke it with `@BotFather` and configure a fresh token.
+
+Telegram upload availability and maximum document size depend on Telegram's current Bot API limits. Kudex reports Telegram's rejection without removing the local archive. This integration uploads backups to Telegram; downloading/restoring archives from Telegram is not currently included. Existing local restore remains available from the main menu.
