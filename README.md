@@ -180,3 +180,7 @@ Backup Manager → **[10] Smart backup retention** can keep the latest 5–100 l
 The dashboard now displays the latest local backup filename and the backup/reboot timer states, alongside the existing VPS, resource, client, and service information.
 
 Backup Manager → **[11] Smart backup sync** can mirror each new local Kudex archive to an already-mounted external disk or network share. Configure the mount point once; Kudex writes copies into its `KudexBackups` subdirectory and creates a SHA-256 checksum sidecar. The mount must already be active when a backup runs. If it is disconnected or the copy fails, the local backup is retained and Kudex reports a sync warning. Manual sync of the latest archive is also available. Disabling sync does not delete existing copies on the mounted destination. This is mounted-storage mirroring, not a built-in Google Drive client.
+
+## Account expiry cleanup
+
+SSH Account Manager → **[8] Clean expired** lists only Kudex-managed SSH users whose recorded expiry has passed, then asks for confirmation before deleting their Linux accounts and home directories. It also removes their Kudex concurrency-limit entries. Existing SSH sessions can remain active until they disconnect. VMess, VLESS, and Trojan account menus include **[6] Clean expired**, which removes expired client records and reapplies the validated Xray configuration; if applying the new configuration fails, Kudex restores the previous client database.
