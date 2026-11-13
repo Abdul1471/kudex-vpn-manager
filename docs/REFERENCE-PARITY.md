@@ -85,7 +85,7 @@ Already present in Kudex:
 - [x] Deny-by-default proxy ACL; unauthenticated remote proxy access is rejected.
 - [x] Squid configuration parse check and backup before activation.
 - [x] Authenticated Dante SOCKS5 on TCP/1080, with PAM group-restricted users and account lock/unlock.
-- [ ] OHP, BadVPN UDPGW, OpenVPN provisioning, license service, anti-multilogin, DDoS controls, and cloud Drive integration remain outstanding.
+- [x] BadVPN UDPGW, OpenVPN provisioning, Google Drive backup upload, and Fail2ban SSH brute-force protection are implemented (source-level; VPS verification pending).\n- [ ] OHP, premium license API, per-account three-strike lock, safe active-session termination, and general DDoS mitigation remain outstanding.
 
 
 
