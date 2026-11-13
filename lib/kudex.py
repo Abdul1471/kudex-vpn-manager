@@ -1330,6 +1330,49 @@ WantedBy=timers.target
     run(["systemctl", "enable", "--now", "kudex-expiry.timer"])
     print("Automatic account expiry enforcement enabled (checks every five minutes).")
 
+def verify_kudex_backup(path):
+    path = pathlib.Path(path)
+    if path.parent.resolve() != BACKUPS.resolve() or not path.is_file():
+        raise RuntimeError("Select a backup stored inside the Kudex backup directory.")
+    allowed = {"etc/kudex/state.json", "etc/kudex/clients.json",
+               "usr/local/etc/xray/config.json", "etc/nginx/sites-available/kudex.conf"}
+    checked = []
+    try:
+        with tarfile.open(path, "r:gz") as archive:
+            for member in archive.getmembers():
+                name = member.name.lstrip("./")
+                if member.issym() or member.islnk() or member.isdev() or member.isfifo():
+                    raise RuntimeError("Backup contains an unsafe filesystem entry.")
+                if name in allowed and member.isfile():
+                    stream = archive.extractfile(member)
+                    if stream is None:
+                        raise RuntimeError("Could not read backup member: " + name)
+                    content = stream.read()
+                    if name.endswith(".json"):
+                        json.loads(content.decode("utf-8"))
+                    checked.append(name)
+    except (tarfile.TarError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Backup verification failed: " + str(exc))
+    if not checked:
+        raise RuntimeError("Archive contains no recognized Kudex configuration files.")
+    print("Backup verification passed. Recognized files:")
+    for name in sorted(set(checked)):
+        print(" - " + name)
+    return True
+
+def verify_backups_menu():
+    archives = sorted(BACKUPS.glob("kudex-*.tar.gz"), reverse=True)
+    if not archives:
+        print("No Kudex backups found.")
+        return
+    for index, item in enumerate(archives, 1):
+        print("[" + str(index) + "] " + item.name + " (" + human_bytes(item.stat().st_size) + ")")
+    raw = ask("Backup number to verify")
+    if not raw.isdigit() or not 1 <= int(raw) <= len(archives):
+        print("Invalid selection.")
+        return
+    verify_kudex_backup(archives[int(raw) - 1])
+
 def backup_menu():
     while True:
         timer_state = service_state("kudex-backup.timer")
@@ -1343,6 +1386,7 @@ def backup_menu():
         print("[6] Enable automatic account expiry checks")
         print("[7] Disable automatic account expiry checks")
         print("[8] Telegram backup integration")
+        print("[9] Verify a backup archive")
         print(f"Backup schedule: {timer_state} | Expiry checks: {expiry_timer_state}")
         print("[0] Back")
         choice = input("Select: ").strip()
@@ -1372,6 +1416,8 @@ def backup_menu():
                 print("Automatic account expiry checks disabled.")
         elif choice == "8":
             telegram_backup_menu()
+        elif choice == "9":
+            verify_backups_menu()
         else:
             print("Invalid selection.")
 
