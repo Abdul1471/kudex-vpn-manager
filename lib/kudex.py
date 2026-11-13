@@ -398,6 +398,29 @@ def certbot_issue_args(domain, webroot):
             "--keep-until-expiring"]
 
 
+def validate_pointed_domain(pointed_domain, nameserver):
+    pointed = (pointed_domain or "").strip().lower().rstrip(".")
+    ns = (nameserver or "").strip().lower().rstrip(".")
+    if not valid_domain(pointed):
+        raise RuntimeError("Invalid Pointed Domain. Enter a full hostname such as vpn.example.com.")
+    if not valid_domain(ns):
+        raise RuntimeError("Invalid NameServer. Enter a full hostname such as ns.vpn.example.com.")
+    return pointed, ns
+
+
+def configure_pointed_domain(pointed_domain=None, nameserver=None):
+    require_root()
+    if pointed_domain is None:
+        pointed_domain = ask("Pointed Domain (for example vpn.example.com)")
+    if nameserver is None:
+        nameserver = ask("NameServer (for example ns.vpn.example.com)")
+    pointed, ns = validate_pointed_domain(pointed_domain, nameserver)
+    st = state()
+    st.update({"pointed_domain": pointed, "nameserver": ns})
+    atomic_json(STATE, st)
+    configure_domain(pointed, "")
+
+
 def configure_domain(domain_input=None, subdomain_input=None):
     require_root()
     st = state()
@@ -3284,6 +3307,9 @@ def main():
     require_root(); ensure_dirs()
     if len(sys.argv) > 1:
         if sys.argv[1] == "--install-xray": install_xray(force="--yes" in sys.argv); return
+        if sys.argv[1] == "--configure-pointed-domain":
+            configure_pointed_domain(sys.argv[2] if len(sys.argv) > 2 else None,
+                                     sys.argv[3] if len(sys.argv) > 3 else None); return
         if sys.argv[1] == "--configure-domain":
             configure_domain(sys.argv[2] if len(sys.argv) > 2 else None,
                              sys.argv[3] if len(sys.argv) > 3 else None); return
