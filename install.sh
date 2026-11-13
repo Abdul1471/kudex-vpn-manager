@@ -2,8 +2,14 @@
 set -Eeuo pipefail
 INSTALL_DIR="/opt/kudex-vpn-manager"
 BIN_PATH="/usr/local/sbin/kudex"
+LICENSE_API="https://kudex-license-api.yabdulqudus1471.workers.dev"
 info() { printf '[Kudex] %s\n' "$*"; }
 die() { printf '[ERROR] %s\n' "$*" >&2; exit 1; }
+valid_dns_name() {
+ local value="${1%.}"
+ [[ ${#value} -le 253 ]] || return 1
+ [[ "$value" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]
+}
 [[ "$EUID" -eq 0 ]] || die "Run with sudo: sudo bash install.sh"
 command -v apt-get >/dev/null 2>&1 || die "Only apt-based Ubuntu/Debian systems are supported."
 [[ -r /etc/os-release ]] || die "Cannot identify operating system."
@@ -15,10 +21,54 @@ case "$ID" in
 esac
 SCRIPT_DIR="$(cd -- "$(dirname -- "$0")" && pwd)"
 [[ -f "$SCRIPT_DIR/lib/kudex.py" && -f "$SCRIPT_DIR/bin/kudex" ]] || die "Run from repository root."
+
+# Bootstrap only the HTTPS client needed to contact the licensing service.
 export DEBIAN_FRONTEND=noninteractive
-info "Installing dependencies..."
+info "Preparing secure connection to KudexTech licensing..."
 apt-get update
-apt-get install -y --no-install-recommends bash coreutils curl ca-certificates openssl python3 nginx openssh-server dropbear certbot
+apt-get install -y --no-install-recommends curl ca-certificates
+
+AUTH_RESPONSE="$(mktemp)"
+trap 'rm -f "$AUTH_RESPONSE"' EXIT
+if ! curl --silent --show-error --fail --max-time 20 \
+  --request POST "$LICENSE_API/api/authenticate" \
+  --header "Accept: application/json" \
+  --output "$AUTH_RESPONSE"; then
+  die "Could not reach KudexTech License API. Installation stopped before domain setup."
+fi
+if ! grep -Eq '"authenticated"[[:space:]]*:[[:space:]]*true' "$AUTH_RESPONSE"; then
+  printf '\n'
+  info "This VPS IP is not currently licensed."
+  info "Register its IP using the /trialip endpoint, or ask the administrator to assign a 30-day or Lifetime license."
+  info "License API response:"
+  cat "$AUTH_RESPONSE"
+  die "VPS authentication failed. No VPN services have been installed or configured."
+fi
+rm -f "$AUTH_RESPONSE"
+trap - EXIT
+info "VPS IP authenticated successfully."
+
+POINTED_DOMAIN=""
+NAMESERVER=""
+if [[ -t 0 ]]; then
+  while true; do
+    read -r -p "Enter Pointed Domain (e.g. vpn.example.com): " POINTED_DOMAIN
+    POINTED_DOMAIN="${POINTED_DOMAIN,,}"
+    POINTED_DOMAIN="${POINTED_DOMAIN%.}"
+    valid_dns_name "$POINTED_DOMAIN" && break
+    info "Invalid hostname. Enter a full domain such as vpn.example.com."
+  done
+  while true; do
+    read -r -p "Enter NameServer (e.g. ns.vpn.example.com): " NAMESERVER
+    NAMESERVER="${NAMESERVER,,}"
+    NAMESERVER="${NAMESERVER%.}"
+    valid_dns_name "$NAMESERVER" && break
+    info "Invalid nameserver hostname. Enter a full hostname such as ns.vpn.example.com."
+  done
+fi
+
+info "Installing Kudex VPN Manager dependencies..."
+apt-get install -y --no-install-recommends bash coreutils openssl python3 nginx openssh-server dropbear certbot
 info "Configuring Dropbear on TCP/2222; OpenSSH remains on TCP/22."
 if [[ -f /etc/default/dropbear ]]; then cp -a /etc/default/dropbear "/etc/default/dropbear.kudex-backup.$(date +%s)"; fi
 cat > /etc/default/dropbear <<'DROPBEAR'
@@ -63,15 +113,11 @@ if [[ -t 0 ]]; then
   python3 "$INSTALL_DIR/lib/kudex.py" --install-xray --yes
   python3 "$INSTALL_DIR/lib/kudex.py" --apply-config
  fi
- read -r -p "Enter your main domain (e.g. example.com; DNS must point to this VPS; leave blank to skip): " domain
- if [[ -n "$domain" ]]; then
-  read -r -p "Enter your subdomain (e.g. vpn; leave blank to use the main domain): " subdomain
-  if ! python3 "$INSTALL_DIR/lib/kudex.py" --configure-domain "$domain" "$subdomain"; then
-   info "Domain setup did not finish. You can retry later from sudo kudex → [07] DOMAIN & SSL."
-  fi
- else
-  info "Domain and subdomain setup skipped. You can configure them later from sudo kudex → [07] DOMAIN & SSL."
+ if ! python3 "$INSTALL_DIR/lib/kudex.py" --configure-pointed-domain "$POINTED_DOMAIN" "$NAMESERVER"; then
+  info "Domain setup did not finish. You can retry later from sudo kudex → [07] DOMAIN & SSL."
  fi
+else
+ info "Non-interactive install: domain and nameserver prompts were skipped."
 fi
 info "Installation complete. Open provider firewall TCP/2222 if Dropbear is required."
 info "Keep your current SSH session open. Launch: sudo kudex"
