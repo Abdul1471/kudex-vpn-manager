@@ -13,7 +13,7 @@ Already present in Kudex:
 - Xray configuration validation before activation
 - Nginx TLS termination and WebSocket reverse proxy
 - SSH over WebSocket, Dropbear, and Stunnel4
-- OpenVPN service controls (not full OpenVPN provisioning)
+- OpenVPN service controls and Kudex server/client provisioning (UDP/2200, opt-in)
 - DNSTT/SlowDNS server/key management
 - SSH concurrency limits, banner editor, daily reboot scheduler
 - Backups, scheduled backups, Telegram upload/restore, retention, mounted-storage sync
@@ -37,7 +37,7 @@ Already present in Kudex:
 | BadVPN UDPGW | Implemented (opt-in) | BadVPN package, TCP/7100–7300, loopback default, explicit confirmation for unauthenticated public binding; pending VPS verification |
 | Premium cloud license | Not implemented | Requires the owner-provided issuer API, public verification key, licensing terms, and server-side validation |
 | Telegram cloud backup/restore | Partial | Current implementation uploads and restores documents sent to the configured bot chat; arbitrary share-link restore is not supported |
-| Google Drive backup | Implemented through rclone (opt-in) | Root-managed rclone OAuth remote; automatic upload of new local backups; restore can use rclone copy to local backup directory; pending VPS verification |
+| Google Drive backup | Implemented through rclone (opt-in) | Root-managed rclone OAuth remote; automatic upload of new local backups; manual restore/download can be performed with rclone; pending VPS verification |
 | OTA application update | Implemented | Preserve pre-update backup and validate release contents |
 | Automatic expiry | Partial | Existing expiry checks run every five minutes; add configurable expiry policy and optional session termination after safe identity checks |
 | Anti-multilogin / live session termination | Partial | Existing PAM maxlogins + Fail2ban IP bans; live-session termination and per-account strikes remain outstanding |
