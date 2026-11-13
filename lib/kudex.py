@@ -85,7 +85,7 @@ def valid_name(name):
     return bool(re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{2,31}", name))
 
 def valid_domain(domain):
-    if len(domain) > 253 or "." not in domain:
+    if len(domain) > 253 or "." not in domain or domain.endswith("."):
         return False
     return all(re.fullmatch(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)", part) for part in domain.rstrip(".").split("."))
 
@@ -282,6 +282,7 @@ def configure_domain():
     domain = ask("Domain name (A/AAAA record must point to this server)", st.get("domain", ""))
     if not valid_domain(domain):
         raise RuntimeError("Invalid domain name.")
+    domain = domain.lower()
     email = ask("Email address for Let's Encrypt notices", st.get("email", ""))
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise RuntimeError("A valid email address is required.")
