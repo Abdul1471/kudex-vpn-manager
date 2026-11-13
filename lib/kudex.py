@@ -3018,13 +3018,13 @@ def session_termination_allowed(row, current_session_id, current_tty):
     """Never allow terminating root, the current session, or an unverified target."""
     if not current_session_id and not current_tty:
         return False
-    if not row or not row.get("id") or row.get("user") in ("", "root"):
+    if not row or not row.get("id") or row.get("user") in ("", "root") or str(row.get("uid", "")) == "0":
         return False
     if row["id"] == current_session_id:
         return False
     if current_tty and row.get("tty") == current_tty:
         return False
-    return bool(row.get("remote") or row.get("tty", "").startswith("pts/"))
+    return bool(row.get("remote"))
 
 
 def terminate_login_session(session_id):
@@ -3052,7 +3052,7 @@ def session_manager_menu():
         for row in rows:
             protected = (row.get("user") == "root" or row.get("id") == current_id
                          or (current_tty and row.get("tty") == current_tty))
-            kind = "REMOTE" if row.get("remote") or row.get("tty", "").startswith("pts/") else "LOCAL"
+            kind = "REMOTE" if row.get("remote") else "LOCAL"
             status = "PROTECTED" if protected else ("TERMINABLE" if session_termination_allowed(row, current_id, current_tty) else "NOT SAFE TO TERMINATE")
             print(f" [{row['id']}] {row.get('user') or 'unknown':<16} {kind:<6} {row.get('remote_host') or row.get('tty') or '—':<24} {status}")
         print("[1] Terminate a remote session [0] Back")
