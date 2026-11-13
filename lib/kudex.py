@@ -2493,6 +2493,9 @@ def ports_info():
     for proto in ("vmess", "vless", "trojan", "sshws"):
         print(f"{PROTO_NAMES[proto]:<14}: 127.0.0.1:{PORTS[proto]} {PATHS[proto]}")
     print(f"Authenticated HTTP proxy: TCP/{SQUID_PORT} (when Squid is configured)")
+    badvpn = read_json(BADVPN_CONFIG, {})
+    if badvpn: print(f"BadVPN UDPGW: TCP/{badvpn.get('bind', '127.0.0.1')}:{badvpn.get('port', 7300)}")
+    if service_state(OPENVPN_UNIT) != "unknown": print("OpenVPN server: UDP/2200")
     print("\n--- LISTENING SOCKETS ---")
     if shutil.which("ss"): run(["ss", "-lntup"], check=False)
 
@@ -2640,7 +2643,7 @@ def managed_service_units():
         ("Xray core", "xray.service"), ("Dropbear", "dropbear.service"),
         ("Stunnel4 TLS", "stunnel4.service"), ("SlowDNS / DNSTT", "kudex-dnstt.service"),
         ("OpenVPN", "openvpn.service"), ("OpenVPN server", "openvpn-server@server.service"),
-        ("OpenVPN instance", "openvpn@server.service"), ("Cron", "cron.service"),
+        ("OpenVPN instance", "openvpn@server.service"), ("Kudex OpenVPN", "openvpn-server@kudex.service"), ("Cron", "cron.service"),
         ("HTTP proxy (Squid)", "squid.service"), ("Apache web server", "apache2.service"),
     )
     return [(label, unit) for label, unit in candidates if service_state(unit) != "unknown"]
@@ -2673,7 +2676,7 @@ After=network-online.target
 Wants=network-online.target
 [Service]
 Type=simple
-ExecStart={binary} --listen-addr {bind} --listen-port {port} --max-clients 256 --max-connections-for-client 10
+ExecStart={binary} --listen-addr {bind}:{port} --max-clients 256 --max-connections-for-client 10
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=true
