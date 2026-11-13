@@ -170,3 +170,11 @@ Telegram upload availability and maximum document size depend on Telegram's curr
 Telegram restore is available from **Backup Manager → Telegram backup integration → Restore a backup sent to this bot**. Configure a numeric private-chat ID, then send the backup document from that same private chat to the bot. Kudex lists matching incoming documents, downloads the selected archive into /var/backups/kudex, and then opens the existing local restore confirmation flow. The normal restore routine still limits restored files to recognized Kudex configuration paths and validates Xray/Nginx configuration before applying changes. A Telegram webhook or another active getUpdates consumer can prevent polling; in that case, disable the webhook/other poller before using this restore option. Only send backups from a trusted private chat. Existing local backup files are never overwritten by a Telegram download.
 
 Backup Manager also includes **Verify a backup archive**. It checks that the archive can be read, rejects links and special filesystem entries, validates recognized JSON configuration files, and confirms that recognized Kudex restore files are present. Verification does not modify the server or restore the archive.
+
+## Server speed test and smart backup retention
+
+Menu **[23] Server Speed Test** runs the installed Speedtest CLI after an explicit confirmation because the test transfers data and consumes bandwidth. If no CLI is installed, Kudex offers to install the Ubuntu/Debian `speedtest-cli` package. The test uses external test servers; results depend on the selected server and network conditions.
+
+Backup Manager → **[10] Smart backup retention** can keep the latest 5–100 local Kudex archives. Automatic rotation is disabled until an administrator enables a retention policy. Once enabled, new scheduled or manual backups trigger rotation after the new archive is safely written. The administrator must confirm before an immediate cleanup; disabling retention preserves existing archives. Only matching regular Kudex backup archives in `/var/backups/kudex` are eligible, and Telegram copies are never deleted.
+
+The dashboard now displays the latest local backup filename and the backup/reboot timer states, alongside the existing VPS, resource, client, and service information.
