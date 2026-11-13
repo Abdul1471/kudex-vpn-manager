@@ -30,6 +30,27 @@ Clone this repository, enter its directory, and run:
     sudo bash install.sh
     sudo kudex
 
+### Update later — no clone or reinstall required
+
+Once Kudex is installed, use these commands directly on Ubuntu/Debian:
+
+    sudo kudex update
+
+This downloads the latest application files from the repository's main branch, validates the Python source, saves a pre-update backup, and replaces the installed Kudex program. Your VPN users, client credentials, domain, certificates, and server configuration remain in place. It does not reinstall packages or restart VPN services.
+
+To update Ubuntu/Debian system packages as well:
+
+    sudo kudex upgrade
+
+This runs apt-get update followed by apt-get upgrade and asks for confirmation first. It upgrades operating-system packages, not the Kudex application.
+
+To do both:
+
+    sudo kudex update
+    sudo kudex upgrade
+
+You can also choose [13] UPDATE KUDEX APPLICATION or [14] UPGRADE UBUNTU/DEBIAN PACKAGES from the terminal menu. Keep your current SSH session open during system upgrades.
+
 Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does not change OpenSSH port or rewrite sshd_config. Existing Dropbear defaults are backed up before setting port 2222 and disabling Dropbear root login.
 
 ## First-time setup
@@ -56,6 +77,8 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
     [10] INSTALL/UPDATE XRAY
     [11] APPLY CONFIG
     [12] RESTORE BACKUP
+    [13] UPDATE KUDEX APPLICATION
+    [14] UPGRADE UBUNTU/DEBIAN PACKAGES
     [00] EXIT SYSTEM
 
 ## Network layout
