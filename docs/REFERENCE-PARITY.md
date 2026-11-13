@@ -96,3 +96,8 @@ Already present in Kudex:
 - [x] Google Drive backup uploads through rclone OAuth remotes; credentials remain outside the repository.
 - [x] Fail2ban SSH brute-force jail (3 failures / 10 minutes / 1-hour ban), with the active SSH peer allowlisted when detectable.
 - [ ] OHP, premium license API, per-account three-strike lock, safe active-session termination, and general DDoS mitigation remain outstanding. These require verified upstream compatibility, owner-provided licensing infrastructure, and safe authentication/firewall integration.
+
+
+## Active session management update
+
+Kudex now includes a guarded session manager using systemd-logind. It can terminate a selected remote login only after re-checking the session, and it refuses root sessions, the current session, the current terminal, and any request when the active Kudex terminal cannot be identified. This does not implement automatic per-account three-strike lockout or general DDoS mitigation.
