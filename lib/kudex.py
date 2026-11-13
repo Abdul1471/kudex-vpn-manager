@@ -657,7 +657,7 @@ def ssh_login_limits():
         return result
     for line in lines:
         parts = line.split()
-        if len(parts) == 4 and parts[1:3] == ["hard", "maxlogins"] and valid_name(parts[0]) and parts[3].isdigit():
+        if len(parts) == 4 and parts[1:3] == ["hard", "maxlogins"] and valid_name(parts[0]) and parts[0] != "root" and parts[3].isdigit():
             result[parts[0]] = int(parts[3])
     return result
 
