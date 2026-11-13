@@ -240,7 +240,7 @@ SSH Account Manager → **[8] Clean expired** lists only Kudex-managed SSH users
 - **Google Drive backup** is available in menu [29] through rclone. Configure the Google Drive remote interactively as root, select its remote name, and choose a folder. Scheduled backups are copied when configured. rclone OAuth tokens remain in root's rclone config (outside the repository); protect that file and revoke access from Google's account security page if exposed.
 - **SSH brute-force protection** is available in menu [30] through Fail2ban. The default policy bans a source IP after three failed SSH attempts in ten minutes for one hour and allowlists the current SSH peer where detectable. This is not a per-account three-strike lock and is not a general DDoS mitigation system.
 
-OHP custom-header transport, cloud licensing, per-account failed-login lockout, and safe active-session termination are not advertised as implemented. OHP requires a verified compatible client/server implementation; licensing requires your real issuer API and policy; per-account lockout requires a validated PAM/auth-log integration. Kudex will not simulate those features or embed licensing secrets.
+OHP custom-header transport, cloud licensing, and per-account failed-login lockout are not advertised as implemented. Guarded active-session termination is available through menu [31] and remains subject to VPS verification. OHP requires a verified compatible client/server implementation; licensing requires your real issuer API and policy; per-account lockout requires a validated PAM/auth-log integration. Kudex will not simulate those features or embed licensing secrets.
 
 
 ## Active SSH session management
