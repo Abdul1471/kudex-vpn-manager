@@ -1755,7 +1755,7 @@ def verify_kudex_backup(path):
     if path.parent.resolve() != BACKUPS.resolve() or not path.is_file():
         raise RuntimeError("Select a backup stored inside the Kudex backup directory.")
     allowed = {"etc/kudex/state.json", "etc/kudex/clients.json",
-               "usr/local/etc/xray/config.json", "etc/nginx/sites-available/kudex.conf"}
+               "etc/kudex/reality.json", "usr/local/etc/xray/config.json", "etc/nginx/sites-available/kudex.conf"}
     checked = []
     try:
         with tarfile.open(path, "r:gz") as archive:
@@ -1860,7 +1860,7 @@ def restore_backup():
     if not confirm(f"Restore protected configuration from {chosen.name}?"):
         return
     allowed = {"etc/kudex/state.json", "etc/kudex/clients.json",
-               "usr/local/etc/xray/config.json", "etc/nginx/sites-available/kudex.conf"}
+               "etc/kudex/reality.json", "usr/local/etc/xray/config.json", "etc/nginx/sites-available/kudex.conf"}
     staged = {}
     with tarfile.open(chosen, "r:gz") as tf:
         for member in tf.getmembers():
@@ -1872,6 +1872,7 @@ def restore_backup():
         raise RuntimeError("Backup contained no recognized Kudex configuration files.")
     targets = {
         "etc/kudex/state.json": STATE, "etc/kudex/clients.json": CLIENTS,
+        "etc/kudex/reality.json": REALITY_CONFIG,
         "usr/local/etc/xray/config.json": XRAY_CONFIG, "etc/nginx/sites-available/kudex.conf": NGINX_SITE
     }
     previous = {name: (path.read_bytes() if path.exists() else None) for name, path in targets.items() if name in staged}
