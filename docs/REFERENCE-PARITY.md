@@ -30,19 +30,19 @@ Already present in Kudex:
 | SSH-WS on TCP/80 | Not implemented as a dedicated listener | Add an explicit listener option with conflict checks; do not silently take Nginx port 80 |
 | HTTPS VPN listener on TCP/443 | Partial | Existing Nginx terminates TLS; add supported transport routing without breaking ACME |
 | HTTP proxy on TCP/8880 | Implemented (Squid) | Authenticated users, deny-by-default ACL, config validation/backup; pending VPS verification |
-| OpenVPN TCP/UDP provisioning | Not implemented | Add server/client configuration lifecycle; current menu only controls existing services |
-| OHP custom-header transport | Not implemented | Add supported OHP service and client configuration only after compatibility tests |
+| OpenVPN TCP/UDP provisioning | Implemented (opt-in, UDP/2200) | Easy-RSA CA, server/client certificates, tls-crypt, client profile export; no NAT/firewall/default-route changes; pending VPS verification |
+| OHP custom-header transport | Not implemented | Awaiting verified compatible upstream implementation and client interoperability tests |
 | SlowDNS / DNSTT | Partial | Add multiple named profiles/custom keypairs and safe rotation/rollback |
 | Dante SOCKS5 on TCP/1080 | Implemented (PAM) | Dedicated group-restricted accounts, lock/unlock, port checks; pending VPS verification |
-| BadVPN UDPGW | Not implemented | Add UDP gateway service lifecycle and port-range validation |
-| Premium cloud license | Not implemented | Requires a real licensing API, issuer, terms, and secure server-side validation; no fake/offline success mode |
+| BadVPN UDPGW | Implemented (opt-in) | BadVPN package, TCP/7100–7300, loopback default, explicit confirmation for unauthenticated public binding; pending VPS verification |
+| Premium cloud license | Not implemented | Requires the owner-provided issuer API, public verification key, licensing terms, and server-side validation |
 | Telegram cloud backup/restore | Partial | Current implementation uploads and restores documents sent to the configured bot chat; arbitrary share-link restore is not supported |
-| Google Drive backup/restore | Not implemented | Requires OAuth/client configuration and secure token storage |
+| Google Drive backup | Implemented through rclone (opt-in) | Root-managed rclone OAuth remote; automatic upload of new local backups; restore can use rclone copy to local backup directory; pending VPS verification |
 | OTA application update | Implemented | Preserve pre-update backup and validate release contents |
 | Automatic expiry | Partial | Existing expiry checks run every five minutes; add configurable expiry policy and optional session termination after safe identity checks |
-| Anti-multilogin / live session termination | Partial | Existing PAM maxlogins limit; implement reliable session tracking, protected-admin exclusions, and explicit termination confirmation |
-| Three-strike account lock | Not implemented | Requires reliable authentication-failure event collection, threshold/window policy, and recovery flow |
-| DDoS-Deflate / connection protection | Not implemented | Add conservative rate detection, temporary bans, allowlists, expiry, and firewall rollback safeguards |
+| Anti-multilogin / live session termination | Partial | Existing PAM maxlogins + Fail2ban IP bans; live-session termination and per-account strikes remain outstanding |
+| Three-strike account lock | Not implemented | Fail2ban currently bans source IPs; per-account lockout requires validated PAM/auth-log integration |
+| SSH brute-force protection | Implemented (Fail2ban, opt-in) | Three failures / ten minutes / one-hour source-IP ban; current SSH peer allowlisted when detectable; not general DDoS protection |
 | RAM maintenance | Not implemented | Provide diagnostics and safe maintenance; do not market cache dropping as a performance fix |
 | Scheduled reboot | Implemented | Keep disabled by default and require explicit confirmation |
 | Diagnostics and speed test | Implemented | Extend reporting as new services are added |
@@ -87,3 +87,12 @@ Already present in Kudex:
 - [x] Authenticated Dante SOCKS5 on TCP/1080, with PAM group-restricted users and account lock/unlock.
 - [ ] OHP, BadVPN UDPGW, OpenVPN provisioning, license service, anti-multilogin, DDoS controls, and cloud Drive integration remain outstanding.
 
+
+
+## Additional implementations (source-level; VPS verification pending)
+
+- [x] BadVPN UDPGW systemd lifecycle with configurable TCP/7100–7300, loopback default, and explicit warning before unauthenticated public binding.
+- [x] OpenVPN server provisioning using Easy-RSA, certificate authentication, tls-crypt, and individual client profiles. No automatic NAT, firewall or default-route changes.
+- [x] Google Drive backup uploads through rclone OAuth remotes; credentials remain outside the repository.
+- [x] Fail2ban SSH brute-force jail (3 failures / 10 minutes / 1-hour ban), with the active SSH peer allowlisted when detectable.
+- [ ] OHP, premium license API, per-account three-strike lock, safe active-session termination, and general DDoS mitigation remain outstanding. These require verified upstream compatibility, owner-provided licensing infrastructure, and safe authentication/firewall integration.
