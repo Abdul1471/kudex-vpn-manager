@@ -1294,21 +1294,28 @@ def squid_proxy_configure():
     run(["apt-get", "install", "-y", "--no-install-recommends", "squid", "apache2-utils"])
     if not squid_proxy_installed():
         raise RuntimeError("Squid or its basic_ncsa_auth helper is missing after installation.")
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        try:
-            probe.bind(("0.0.0.0", SQUID_PORT))
-        except OSError as exc:
-            raise RuntimeError(f"TCP/{SQUID_PORT} is already in use; free the port before configuring Squid.") from exc
+    if service_state("squid.service") != "active":
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(("0.0.0.0", SQUID_PORT))
+            except OSError as exc:
+                raise RuntimeError(f"TCP/{SQUID_PORT} is already in use; free the port before configuring Squid.") from exc
     SQUID_CONFIG.parent.mkdir(parents=True, exist_ok=True)
+    backup_path = None
     if SQUID_CONFIG.exists():
         stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        shutil.copy2(SQUID_CONFIG, SQUID_CONFIG.with_name(f"squid.conf.kudex-backup-{stamp}"))
+        backup_path = SQUID_CONFIG.with_name(f"squid.conf.kudex-backup-{stamp}")
+        shutil.copy2(SQUID_CONFIG, backup_path)
     SQUID_PASSWORDS.touch(mode=0o640, exist_ok=True)
     os.chown(SQUID_PASSWORDS, 0, grp.getgrnam("proxy").gr_gid)
     SQUID_CONFIG.write_text(squid_proxy_config())
     os.chmod(SQUID_CONFIG, 0o640)
     test = subprocess.run(["squid", "-k", "parse"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     if test.returncode:
+        if backup_path and backup_path.exists():
+            shutil.copy2(backup_path, SQUID_CONFIG)
+        else:
+            SQUID_CONFIG.unlink(missing_ok=True)
         raise RuntimeError("Squid rejected the generated configuration:\\n" + test.stdout[-2500:])
     run(["systemctl", "enable", "--now", "squid.service"])
     run(["systemctl", "restart", "squid.service"])
@@ -2240,6 +2247,7 @@ def dashboard():
     print(" [19] SSH Security Manager [20] SlowDNS / DNSTT")
     print(" [21] SSH Banner Editor    [22] Auto-Reboot Scheduler")
     print(" [23] Server Speed Test      [24] Xray Transport Manager")
+    print(" [25] Authenticated HTTP Proxy")
     print(" [00] Exit")
     print(cyan+"─"*64+reset)
 
