@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+BASE_DIR="/opt/kudex-vpn-manager"
+if [[ -r "$(dirname -- "${BASH_SOURCE[0]}")/../lib/common.sh" ]]; then
+  BASE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+fi
+# shellcheck source=../lib/common.sh
+source "$BASE_DIR/lib/common.sh"
+
+[[ "${EUID}" -eq 0 ]] || { kudex_error "Run as root: sudo kudex"; exit 1; }
+
+pause() { read -r -p $'\nPress Enter to continue...' _; }
+service_menu() { kudex_service_menu "$1" "$2" || kudex_warn "Service action failed."; pause; }
+
+show_status() {
+  printf '\n%-12s : %s\n' SSH "$(kudex_service_state ssh.service)"
+  printf '%-12s : %s\n' NGINX "$(kudex_service_state nginx.service)"
+  printf '%-12s : %s\n' XRAY "$(kudex_service_state xray.service)"
+  printf '%-12s : %s\n' DROPBEAR "$(kudex_service_state dropbear.service)"
+  printf '%-12s : %s\n' SSH-WS "PLANNED"
+}
+
+backup_configs() {
+  local stamp dest
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  dest="/var/backups/kudex-$stamp"
+  install -d -m 0700 "$dest"
+  for path in /etc/ssh /etc/nginx /etc/dropbear /usr/local/etc/xray; do
+    if [[ -e "$path" ]]; then
+      cp -a "$path" "$dest/"
+    fi
+  done
+  chmod 0700 "$dest"
+  kudex_info "Configuration backup created: $dest"
+}
+
+check_running() {
+  printf '\n--- Service diagnostics ---\n'
+  for unit in ssh.service sshd.service nginx.service xray.service dropbear.service; do
+    if systemctl list-unit-files "$unit" --no-legend 2>/dev/null | grep -q .; then
+      printf '%-18s %s\n' "$unit" "$(systemctl is-active "$unit" 2>/dev/null || true)"
+    fi
+  done
+  printf '\nDisk: '; df -h / | awk 'NR==2 {print $4 " free of " $2}'
+  printf 'Memory: '; free -h | awk '/^Mem:/ {print $7 " available of " $2}'
+}
+
+ssh_menu() {
+  local choice username password
+  while true; do
+    printf '\n--- SSH ACCOUNT MENU ---\n'
+    printf '[1] Create user\n[2] List users with login shells\n[3] Lock user\n[4] Unlock user\n[0] Back\n'
+    read -r -p 'Select: ' choice
+    case "$choice" in
+      1)
+        read -r -p 'Username (3-32 chars, letters/numbers/._-): ' username
+        [[ "$username" =~ ^[a-zA-Z][a-zA-Z0-9._-]{2,31}$ ]] || { kudex_warn "Invalid username."; continue; }
+        if id "$username" >/dev/null 2>&1; then kudex_warn "User already exists."; continue; fi
+        read -r -s -p 'Temporary password (min 14 chars): ' password; printf '\n'
+        [[ "${#password}" -ge 14 ]] || { unset password; kudex_warn "Password too short."; continue; }
+        useradd --create-home --shell /bin/bash "$username"
+        printf '%s:%s\n' "$username" "$password" | chpasswd
+        unset password
+        kudex_info "User $username created. Share the temporary password securely and ask them to change it immediately."
+        ;;
+      2) getent passwd | awk -F: '$7 ~ /(bash|sh|zsh)$/ {printf "%-24s %s\n",$1,$6}' ;;
+      3|4)
+        read -r -p 'Username: ' username
+        id "$username" >/dev/null 2>&1 || { kudex_warn "User not found."; continue; }
+        if [[ "$choice" == 3 ]]; then passwd -l "$username"; else passwd -u "$username"; fi
+        ;;
+      0) return ;;
+      *) kudex_warn "Invalid selection." ;;
+    esac
+  done
+}
+
+while true; do
+  clear 2>/dev/null || true
+  printf '%s\n' '========================================'
+  printf '%s\n' '        KUDEX VPN MANAGER'
+  printf '%s\n' '========================================'
+  show_status
+  printf '\n[01] SSH       [Menu]\n[02] VMESS     [Planned]\n[03] VLESS     [Planned]\n[04] TROJAN    [Planned]\n[06] BACKUP\n[07] DOMAIN & SSL [Planned]\n[08] CHECK RUNNING\n[00] EXIT SYSTEM\n'
+  read -r -p $'\nSelect option: ' option
+  case "$option" in
+    01|1) ssh_menu ;;
+    02|2|03|3|04|4) kudex_warn "This protocol module is not available in this foundation release."; pause ;;
+    06|6) backup_configs; pause ;;
+    07|7) kudex_warn "Domain and certificate automation is not available yet."; pause ;;
+    08|8) check_running; pause ;;
+    00|0) printf 'Kudex session closed.\n'; exit 0 ;;
+    *) kudex_warn "Invalid option."; pause ;;
+  esac
+done
