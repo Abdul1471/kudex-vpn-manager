@@ -1242,6 +1242,88 @@ def telegram_backup_menu():
         else:
             print("Invalid selection.")
 
+
+BACKUP_POLICY = ETC / "backup-policy.json"
+
+def backup_retention_count():
+    policy = read_json(BACKUP_POLICY, {})
+    count = policy.get("keep_last", 0)
+    return count if isinstance(count, int) and not isinstance(count, bool) and 5 <= count <= 100 else 0
+
+def prune_old_backups(keep_last=None, silent=False):
+    require_root()
+    keep = backup_retention_count() if keep_last is None else keep_last
+    if not isinstance(keep, int) or not 5 <= keep <= 100:
+        raise RuntimeError("Backup retention must be between 5 and 100 archives.")
+    archives = sorted(
+        (p for p in BACKUPS.glob("kudex-*.tar.gz")
+         if p.is_file() and not p.is_symlink()
+         and re.fullmatch(r"kudex-[0-9]{8}-[0-9]{6}\.tar\.gz", p.name)),
+        key=lambda p: p.name, reverse=True
+    )
+    removed = 0
+    for old in archives[keep:]:
+        old.unlink()
+        removed += 1
+    if not silent:
+        print(f"Smart backup cleanup complete: kept {min(len(archives), keep)}, removed {removed} older local archive(s).")
+        print("Telegram copies are not affected.")
+    return removed
+
+def backup_retention_menu():
+    require_root()
+    current = backup_retention_count()
+    print("\n--- SMART BACKUP RETENTION ---")
+    print("Current policy: " + (f"keep latest {current} local archives" if current else "disabled"))
+    print("Only local Kudex archives are rotated; Telegram copies are not deleted.")
+    print("[1] Enable / change retention")
+    print("[2] Disable automatic retention")
+    print("[3] Run cleanup now")
+    print("[0] Back")
+    choice = input("Select: ").strip()
+    if choice == "1":
+        raw = ask("Number of recent backups to keep (5-100)", str(current or 30))
+        if not raw.isdigit() or not 5 <= int(raw) <= 100:
+            print("Enter a number from 5 to 100.")
+            return
+        atomic_json(BACKUP_POLICY, {"keep_last": int(raw)})
+        print(f"Smart retention enabled: keep the latest {raw} local backups.")
+        prune_old_backups(int(raw), silent=False)
+    elif choice == "2":
+        if BACKUP_POLICY.exists() and confirm("Disable automatic local backup rotation?"):
+            BACKUP_POLICY.unlink()
+            print("Automatic backup rotation disabled. Existing archives were preserved.")
+    elif choice == "3":
+        raw = ask("Keep how many recent archives (5-100)", str(current or 30))
+        if not raw.isdigit() or not 5 <= int(raw) <= 100:
+            print("Enter a number from 5 to 100.")
+            return
+        prune_old_backups(int(raw))
+    elif choice != "0":
+        print("Invalid selection.")
+
+def speed_test_menu():
+    require_root()
+    print("\n--- SERVER INTERNET SPEED TEST ---")
+    print("Uses Speedtest CLI infrastructure. The test transfers data and may consume bandwidth.")
+    tool = shutil.which("speedtest") or shutil.which("speedtest-cli")
+    if not tool:
+        if not confirm("Speedtest CLI is not installed. Install the Ubuntu/Debian speedtest-cli package?"):
+            return
+        if not pathlib.Path("/usr/bin/apt-get").exists():
+            raise RuntimeError("Automatic installation is available only on Ubuntu/Debian.")
+        run(["apt-get", "update"])
+        run(["apt-get", "install", "-y", "speedtest-cli"])
+        tool = shutil.which("speedtest-cli") or shutil.which("speedtest")
+    if not tool:
+        raise RuntimeError("Speedtest CLI installation completed but no executable was found.")
+    if not confirm("Run a speed test now? This uses external test servers and transfers data."):
+        return
+    if pathlib.Path(tool).name == "speedtest":
+        run([tool, "--accept-license", "--accept-gdpr"])
+    else:
+        run([tool, "--secure"])
+
 def backup(auto_upload=False):
     ensure_dirs()
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -1254,6 +1336,8 @@ def backup(auto_upload=False):
             tf.add(p, arcname=str(p).lstrip("/"), filter=exclude_telegram_secret)
     os.chmod(target, 0o600)
     print(f"Backup created: {target}")
+    if backup_retention_count():
+        prune_old_backups(silent=True)
     if auto_upload and telegram_settings():
         try:
             upload_telegram_backup(target)
@@ -1387,6 +1471,7 @@ def backup_menu():
         print("[7] Disable automatic account expiry checks")
         print("[8] Telegram backup integration")
         print("[9] Verify a backup archive")
+        print("[10] Smart backup retention")
         print(f"Backup schedule: {timer_state} | Expiry checks: {expiry_timer_state}")
         print("[0] Back")
         choice = input("Select: ").strip()
@@ -1418,6 +1503,8 @@ def backup_menu():
             telegram_backup_menu()
         elif choice == "9":
             verify_backups_menu()
+        elif choice == "10":
+            backup_retention_menu()
         else:
             print("Invalid selection.")
 
@@ -1648,6 +1735,11 @@ def dashboard():
     print(f" CPU Usage      : {cpu:.1f}%" if cpu is not None else " CPU Usage      : unavailable")
     print(f" RAM            : {human_bytes(used)} used / {human_bytes(total)} total / {human_bytes(free)} free")
     print(f" TLS            : {'ENABLED' if st.get('tls') else 'NOT CONFIGURED'}")
+    backups = sorted(BACKUPS.glob("kudex-*.tar.gz"), reverse=True) if BACKUPS.exists() else []
+    latest_backup = backups[0].name if backups else "NONE"
+    print(f" Latest Backup  : {latest_backup}")
+    print(f" Backup Timer   : {service_state('kudex-backup.timer')}")
+    print(f" Reboot Timer   : {service_state('kudex-auto-reboot.timer')}")
     print(gold+"\n CLIENT STATISTICS"+reset)
     print(f" SSH users: {ssh_count} | VMess: {counts['vmess']} | VLESS: {counts['vless']} | Trojan: {counts['trojan']}")
     print(gold+"\n SERVICE STATUS"+reset)
@@ -1664,6 +1756,7 @@ def dashboard():
     print(" [17] Ports & Server Info  [18] Stunnel4 & OpenVPN")
     print(" [19] SSH Security Manager [20] SlowDNS / DNSTT")
     print(" [21] SSH Banner Editor    [22] Auto-Reboot Scheduler")
+    print(" [23] Server Speed Test")
     print(" [00] Exit")
     print(cyan+"─"*64+reset)
 
@@ -1917,6 +2010,7 @@ def main():
             elif choice == "20": dnstt_menu()
             elif choice == "21": banner_menu()
             elif choice == "22": auto_reboot_menu()
+            elif choice == "23": speed_test_menu()
             elif choice in ("0","00"): print("Kudex session closed."); return
             else: print("Invalid option.")
         except (RuntimeError, OSError, ValueError) as exc: print(f"\n[ERROR] {exc}")
