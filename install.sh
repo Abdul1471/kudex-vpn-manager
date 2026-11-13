@@ -34,6 +34,7 @@ install -d -m 0700 /etc/kudex /var/lib/kudex /var/log/kudex /var/backups/kudex
 install -m 0755 "$SCRIPT_DIR/bin/kudex" "$INSTALL_DIR/bin/kudex"
 install -m 0644 "$SCRIPT_DIR/lib/kudex.py" "$INSTALL_DIR/lib/kudex.py"
 install -m 0644 "$SCRIPT_DIR/lib/common.sh" "$INSTALL_DIR/lib/common.sh"
+install -m 0755 "$SCRIPT_DIR/install.sh" "$INSTALL_DIR/install.sh"
 ln -sfn "$INSTALL_DIR/bin/kudex" "$BIN_PATH"
 if [[ ! -e /etc/kudex/state.json ]]; then
  cat > /etc/kudex/state.json <<'STATE'
