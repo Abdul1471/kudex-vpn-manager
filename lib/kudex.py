@@ -288,6 +288,16 @@ def nginx_config(st):
                       "        proxy_set_header Connection $connection_upgrade;",
                       "        proxy_set_header Host $host;", "        proxy_set_header X-Real-IP $remote_addr;",
                       "        proxy_read_timeout 3600s;", "    }"]
+        for proto, port in HTTPUPGRADE_PORTS.items():
+            if not st.get("transports", {}).get(proto, {}).get("httpupgrade", False):
+                continue
+            path = HTTPUPGRADE_PATHS[proto]
+            lines += [f"    location = {path} {{", "        proxy_redirect off;",
+                      f"        proxy_pass http://127.0.0.1:{port};",
+                      "        proxy_http_version 1.1;", "        proxy_set_header Upgrade $http_upgrade;",
+                      "        proxy_set_header Connection $connection_upgrade;",
+                      "        proxy_set_header Host $host;", "        proxy_set_header X-Real-IP $remote_addr;",
+                      "        proxy_read_timeout 3600s;", "    }"]
         lines += ["}"]
     return "\n".join(lines) + "\n"
 
