@@ -224,6 +224,23 @@ class KudexValidationTests(unittest.TestCase):
 
 
 
+class KudexPointedDomainTests(unittest.TestCase):
+    def test_pointed_domain_and_nameserver_are_normalized(self):
+        self.assertEqual(
+            kudex.validate_pointed_domain("VPN.Example.COM.", "NS.VPN.Example.COM."),
+            ("vpn.example.com", "ns.vpn.example.com")
+        )
+
+    def test_invalid_pointed_domain_is_rejected(self):
+        with self.assertRaises(RuntimeError):
+            kudex.validate_pointed_domain("not-a-domain", "ns.example.com")
+
+    def test_invalid_nameserver_is_rejected(self):
+        with self.assertRaises(RuntimeError):
+            kudex.validate_pointed_domain("vpn.example.com", "invalid")
+
+
+
 class KudexDomainCompositionTests(unittest.TestCase):
     def test_main_domain_without_subdomain_is_preserved(self):
         self.assertEqual(kudex.compose_domain("Example.COM", ""), "example.com")
