@@ -84,6 +84,11 @@ Installer installs dependencies and enables Nginx, OpenSSH and Dropbear. It does
     [17] PORTS & SERVER INFO
     [18] STUNNEL4 & OPENVPN\n    [19] SSH SECURITY MANAGER\n    [20] SLOWDNS / DNSTT\n    [21] SSH BANNER EDITOR\n    [22] AUTO-REBOOT SCHEDULER\n    [23] SERVER SPEED TEST\n    [24] XRAY TRANSPORT MANAGER
     [25] AUTHENTICATED HTTP PROXY
+    [26] DANTE SOCKS5 PROXY
+    [27] BADVPN UDP GATEWAY
+    [28] OPENVPN PROVISIONING
+    [29] GOOGLE DRIVE BACKUP
+    [30] SSH / HOST PROTECTION
     [00] EXIT SYSTEM
 
 ## Terminal dashboard and monitoring
