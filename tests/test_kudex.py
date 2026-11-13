@@ -9,6 +9,26 @@ kudex = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(kudex)
 
 class KudexValidationTests(unittest.TestCase):
+    def test_fail2ban_jail_config_uses_real_newlines(self):
+        config = kudex.fail2ban_jail_config(["127.0.0.1/8", "::1", "203.0.113.7"])
+        self.assertIn("[sshd]\nenabled = true\nbackend = systemd\n", config)
+        self.assertIn("ignoreip = 127.0.0.1/8 ::1 203.0.113.7\n", config)
+        self.assertNotIn("\\n", config)
+
+    def test_openvpn_vars_config_uses_real_newlines(self):
+        config = kudex.openvpn_vars_config()
+        self.assertEqual(config.splitlines(), [
+            "set_var EASYRSA_ALGO ec",
+            "set_var EASYRSA_CURVE prime256v1",
+            "set_var EASYRSA_DIGEST sha256",
+        ])
+        self.assertNotIn("\\n", config)
+
+    def test_openvpn_unit_discovery_includes_kudex_instance(self):
+        completed = mock.Mock(stdout="openvpn-server@kudex.service enabled\n")
+        with mock.patch.object(kudex.subprocess, "run", return_value=completed):
+            self.assertEqual(kudex.openvpn_units(), ["openvpn-server@kudex.service"])
+
     def test_squid_proxy_config_requires_authentication_and_denies_others(self):
         config = kudex.squid_proxy_config()
         self.assertIn("http_port 0.0.0.0:8880", config)
